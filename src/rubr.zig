@@ -19,10 +19,13 @@ pub const cli = struct {
         pub fn setupFromOS(self: *Self) !void {
             const aaa = self.aa.allocator();
 
-            self.argv = try aaa.alloc([]const u8, std.os.argv.len);
-            for (std.os.argv, 0..) |c_str, ix| {
-                const len = std.mem.len(c_str);
-                self.argv[ix] = try aaa.dupe(u8, c_str[0..len]);
+            const os_argv = try std.process.argsAlloc(aaa);
+            defer std.process.argsFree(aaa, os_argv);
+
+            self.argv = try aaa.alloc([]const u8, os_argv.len);
+
+            for (os_argv, 0..) |str, ix| {
+                self.argv[ix] = try aaa.dupe(u8, str);
             }
         }
         pub fn setupFromData(self: *Self, argv: []const []const u8) !void {

@@ -17,11 +17,15 @@ pub fn main() !void {
     defer cli_args.deinit();
     try cli_args.parse();
 
+    if (cli_args.mode == null)
+        cli_args.print_help = true;
+
     if (cli_args.print_help) {
         cli_args.printHelp();
         return;
     }
 
-    var my_app = app.App.init(a);
+    const mode = cli_args.mode orelse unreachable;
+    var my_app = app.App.init(a, mode, cli_args.ip, cli_args.port);
     defer my_app.deinit();
 }
