@@ -1,4 +1,4 @@
-// Output from `rake export[walker,cli,log]` from https://github.com/gfannes/rubr from 2025-06-17
+// Output from `rake export[walker,cli,log]` from https://github.com/gfannes/rubr from 2025-06-18
 
 const std = @import("std");
 
@@ -40,7 +40,7 @@ pub const walker = struct {
     
         _ignore_stack: IgnoreStack = undefined,
     
-        pub fn init(a: std.mem.Allocator) !Walker {
+        pub fn init(a: std.mem.Allocator) Walker {
             return Walker{ ._a = a, ._ignore_stack = IgnoreStack.init(a) };
         }
     
@@ -725,7 +725,7 @@ pub const log = struct {
         const Self = @This();
         const BufferedWriter = std.io.BufferedWriter(4096, std.fs.File.Writer);
         // const Writer = BufferedWriter.Writer;
-        const Writer = std.fs.File.Writer;
+        pub const Writer = std.fs.File.Writer;
     
         _file: std.fs.File = std.io.getStdOut(),
         _do_close: bool = false,

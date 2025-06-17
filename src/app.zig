@@ -33,5 +33,20 @@ pub const App = struct {
             const address = try std.net.Address.resolveIp(ip, port);
             _ = address;
         }
+
+        var walker = rubr.walker.Walker.init(self.a);
+        defer walker.deinit();
+
+        var cb = struct {
+            const My = @This();
+            pub fn call(my: *My, dir: std.fs.Dir, path: []const u8, offset: ?rubr.walker.Offsets, kind: rubr.walker.Kind) !void {
+                _ = my;
+                _ = dir;
+                _ = offset;
+                _ = kind;
+                std.debug.print("Path: {s}\n", .{path});
+            }
+        }{};
+        try walker.walk(std.fs.cwd(), &cb);
     }
 };
