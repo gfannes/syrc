@@ -2,6 +2,7 @@ const std = @import("std");
 const app = @import("app.zig");
 const cli = @import("cli.zig");
 const cfg = @import("cfg.zig");
+const rubr = @import("rubr.zig");
 
 pub fn main() !void {
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
@@ -17,15 +18,18 @@ pub fn main() !void {
     defer cli_args.deinit();
     try cli_args.parse();
 
-    if (cli_args.mode == null)
-        cli_args.print_help = true;
-
     if (cli_args.print_help) {
         cli_args.printHelp();
         return;
     }
 
-    const mode = cli_args.mode orelse unreachable;
-    var my_app = app.App.init(a, mode, cli_args.ip, cli_args.port);
+    var log = rubr.log.Log{};
+    log.init();
+    defer log.deinit();
+    log.setLevel(cli_args.verbose);
+
+    var my_app = app.App.init(a, &log, cli_args.mode, cli_args.ip, cli_args.port);
     defer my_app.deinit();
+
+    try my_app.run();
 }

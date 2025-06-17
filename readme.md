@@ -36,6 +36,7 @@ Welcome to `syrc`, a CLI tool to
 	- Message
 		- version, id
 		- read(), write()
+		- Type(u16), Size(u48), Data(zon, string)
 - rubr
 	- Support for collecting func from rubr automatically in a single file
 - app

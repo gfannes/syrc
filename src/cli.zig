@@ -3,7 +3,9 @@ const rubr = @import("rubr.zig");
 
 pub const Error = error{
     ExpectedExeName,
+    ExpectedNumber,
     ExpectedFolder,
+    ExpectedDestination,
     ExpectedIp,
     ExpectedPort,
     ExpectedMode,
@@ -24,10 +26,12 @@ pub const Args = struct {
 
     exe_name: []const u8 = &.{},
     print_help: bool = false,
-    folder: ?[]const u8 = null,
+    verbose: usize = 0,
+    src: ?[]const u8 = null,
+    dst: ?[]const u8 = null,
     ip: ?[]const u8 = null,
     port: u16 = Default.port,
-    mode: ?Mode = null,
+    mode: Mode = Mode.Client,
 
     pub fn init(a: std.mem.Allocator) Self {
         return Self{ .args = rubr.cli.Args.init(a) };
@@ -44,8 +48,12 @@ pub const Args = struct {
         while (self.args.pop()) |arg| {
             if (arg.is("-h", "--help")) {
                 self.print_help = true;
-            } else if (arg.is("-C", "--folder")) {
-                self.folder = (self.args.pop() orelse return Error.ExpectedFolder).arg;
+            } else if (arg.is("-v", "--verbose")) {
+                self.verbose = try (self.args.pop() orelse return Error.ExpectedNumber).as(usize);
+            } else if (arg.is("-s", "--src")) {
+                self.src = (self.args.pop() orelse return Error.ExpectedFolder).arg;
+            } else if (arg.is("-d", "--dst")) {
+                self.dst = (self.args.pop() orelse return Error.ExpectedDestination).arg;
             } else if (arg.is("-a", "--ip")) {
                 self.ip = (self.args.pop() orelse return Error.ExpectedIp).arg;
             } else if (arg.is("-p", "--port")) {
@@ -69,11 +77,13 @@ pub const Args = struct {
 
     pub fn printHelp(self: Self) void {
         std.debug.print("Help for {s}\n", .{self.exe_name});
-        std.debug.print("    -h/--help             Print this help\n", .{});
-        std.debug.print("    -C/--folder FOLDER    Folder to synchronize\n", .{});
-        std.debug.print("    -a/--ip     ADDRESS   Ip address\n", .{});
-        std.debug.print("    -p/--port   PORT      Port to use [optional, default is {}]\n", .{Default.port});
-        std.debug.print("    -m/--model  MODE      Operation mode: 'client', 'server' and 'broker'\n", .{});
+        std.debug.print("    -h/--help               Print this help\n", .{});
+        std.debug.print("    -v/--verbose  LEVEL     Verbosity level\n", .{});
+        std.debug.print("    -s/--src      FOLDER    Source folder to synchronize\n", .{});
+        std.debug.print("    -d/--dst      DEST      Remote destination\n", .{});
+        std.debug.print("    -a/--ip       ADDRESS   Ip address\n", .{});
+        std.debug.print("    -p/--port     PORT      Port to use [optional, default is {}]\n", .{Default.port});
+        std.debug.print("    -m/--model    MODE      Operation mode: 'client', 'server' and 'broker'\n", .{});
         std.debug.print("Developed by Geert Fannes.\n", .{});
     }
 };
