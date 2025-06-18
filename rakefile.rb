@@ -19,6 +19,12 @@ task :install do
     sh("zig build install #{mode_str} --prefix-exe-dir #{gubg_bin_dir}")
 end
 
+desc 'Run all UTs'
+task :ut, %i[filter] do |_task, args|
+    filter = (args[:filter] || '').split(':').map { |e| "-Dtest-filter=#{e}" } * ' '
+    sh "zig build test #{filter}"
+end
+
 desc('Clean')
 task :clean do
     FileUtils.rm_rf('target')

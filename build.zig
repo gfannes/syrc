@@ -61,8 +61,23 @@ pub fn build(b: *std.Build) void {
     const run_step = b.step("run", "Run the app");
     run_step.dependOn(&run_cmd.step);
 
+    // This will add support for `zig build test -Dtest-filter=abc`
+    const test_filters = b.option([]const []const u8, "test-filter", "Skip tests that do not match any filter") orelse &[0][]const u8{};
+
+    // Creates a step for unit testing. This only builds the test executable
+    // but does not run it.
+    const lib_unit_tests = b.addTest(.{
+        .root_source_file = b.path("src/root.zig"),
+        .target = target,
+        .optimize = optimize,
+        .filters = test_filters,
+    });
+
+    const run_lib_unit_tests = b.addRunArtifact(lib_unit_tests);
+
     const exe_unit_tests = b.addTest(.{
         .root_module = exe_mod,
+        .filters = test_filters,
     });
 
     const run_exe_unit_tests = b.addRunArtifact(exe_unit_tests);
@@ -71,5 +86,6 @@ pub fn build(b: *std.Build) void {
     // the `zig build --help` menu, providing a way for the user to request
     // running the unit tests.
     const test_step = b.step("test", "Run unit tests");
+    test_step.dependOn(&run_lib_unit_tests.step);
     test_step.dependOn(&run_exe_unit_tests.step);
 }
