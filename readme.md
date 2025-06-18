@@ -10,6 +10,15 @@ Welcome to `syrc`, a CLI tool to
 - Broker
 - Client
 
+# Requirements
+- Must support setting custom env vars
+- Must run command in same folder
+- Must collect newly created files back
+	- Difficult todo with rsync
+- Must support Windows
+	- Difficult todo with rsync
+- Must manage a set of folders where a build can take place
+
 # Namespaces
 - crypto
 	- Secret
