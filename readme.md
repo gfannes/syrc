@@ -34,6 +34,7 @@ Welcome to `syrc`, a CLI tool to
 	- Tree
 - store
 	- Object/File
+	- Copy file parts efficiently: https://cfengine.com/blog/2024/efficient-data-copying-on-modern-linux/
 - brkr
 	- Broker
 - clnt
