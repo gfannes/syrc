@@ -5,6 +5,9 @@ const cfg = @import("cfg.zig");
 const rubr = @import("rubr.zig");
 
 pub fn main() !void {
+    const s = rubr.profile.Scope.init(.A);
+    defer s.deinit();
+
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
     defer _ = gpa.deinit();
 
