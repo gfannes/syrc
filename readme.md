@@ -1,5 +1,3 @@
-&!:syrc
-
 Welcome to `syrc`, a CLI tool to
 - Sync a local folder with a remote folder, potentially on a different machine
 - Run a command
