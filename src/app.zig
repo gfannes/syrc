@@ -39,14 +39,26 @@ pub const App = struct {
 
         var cb = struct {
             const My = @This();
+
+            a: std.mem.Allocator,
+
             pub fn call(my: *My, dir: std.fs.Dir, path: []const u8, offset: ?rubr.walker.Offsets, kind: rubr.walker.Kind) !void {
-                _ = my;
-                _ = dir;
                 _ = offset;
-                _ = kind;
-                std.debug.print("Path: {s}\n", .{path});
+
+                if (kind == rubr.walker.Kind.File) {
+                    const file = try dir.openFile(path, .{});
+                    defer file.close();
+
+                    const stat = try file.stat();
+                    std.debug.print("Path: {s} {}\n", .{ path, stat.size });
+
+                    const r = file.reader();
+
+                    const content = try r.readAllAlloc(my.a, stat.size);
+                    defer my.a.free(content);
+                }
             }
-        }{};
+        }{ .a = self.a };
         try walker.walk(std.fs.cwd(), &cb);
     }
 };
