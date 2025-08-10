@@ -1,8 +1,51 @@
 &&:syrc
 
-# TODO Create tree overview
-- [/] Iterate over tree
-	- [x] Basic walking of CWD in [[app.zig]]
-- [ ] Add additional files/folders with `.syrc` files, next to `.ignore` and `.gitignore`
-- [ ] Compute checksum for content
- - SHA2 is secure enough, faster and shorter
+# Client
+- [x] Measure/print duration
+- [ ] Create tree state
+	- [/] List all files
+		- [x] Basic walking of CWD in [[app.zig]]
+		- [ ] Add additional files/folders with `.syrc` files, next to `.ignore` and `.gitignore`
+	- [ ] Add attribute info
+	- [/] Add checksum info
+		- SHA2 is secure enough, faster and shorter
+		- [*] Use a thread pool directly to queue the checksum tasks
+			- [*] Limit the queue size with a semaphore, by default to the CPU count
+		- Read files into buffers
+			- Is this faster MT?
+		- Compute checksum
+			- Is this faster MT?
+
+# Modules
+- crypto
+	- Secret
+		- Sedes from file
+	- Sign with HMAC-SHA256: HMAC(Secret, Time+Message)
+	- Hash
+- cli
+	- Args
+- cfg
+	- Config
+		- name, server, port
+- mdl
+	- Tree
+- store
+	- Object/File
+	- Copy file parts efficiently: https://cfengine.com/blog/2024/efficient-data-copying-on-modern-linux/
+- brkr
+	- Broker
+- clnt
+	- Client
+- srvr
+	- Server
+- net
+- msg
+	- Message
+		- version, id
+		- read(), write()
+		- Type(u16), Size(u48), Data(zon, string)
+- rubr
+	- Support for collecting func from rubr automatically in a single file
+- app
+- main
+	- `supr -C ./ -s abc cmd args`

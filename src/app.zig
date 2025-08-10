@@ -41,6 +41,7 @@ pub const App = struct {
             const My = @This();
 
             a: std.mem.Allocator,
+            total_size: u64 = 0,
 
             pub fn call(my: *My, dir: std.fs.Dir, path: []const u8, offset: ?rubr.walker.Offsets, kind: rubr.walker.Kind) !void {
                 _ = offset;
@@ -50,11 +51,13 @@ pub const App = struct {
                     defer file.close();
 
                     const stat = try file.stat();
-                    std.debug.print("Path: {s} {}\n", .{ path, stat.size });
+                    const my_size = stat.size;
+                    my.total_size += my_size;
+                    std.debug.print("Path: {s}, my size: {}, total_size: {}\n", .{ path, my_size, my.total_size });
 
                     const r = file.reader();
 
-                    const content = try r.readAllAlloc(my.a, stat.size);
+                    const content = try r.readAllAlloc(my.a, my_size);
                     defer my.a.free(content);
                 }
             }
