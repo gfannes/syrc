@@ -30,11 +30,27 @@ pub const FileState = struct {
     path: []const u8,
     data: ?[]const u8 = null,
     checksum: ?crypto.Checksum = null,
-    attributes: ?Attributes = null,
-    timestamp: ?Timestamp = null,
+    attributes: Attributes = .{},
+    timestamp: Timestamp = 0,
 
     pub fn write(self: Self, writer: anytype) !void {
         try sedes.writeString(self.path, writer);
+
+        const checksum: []const u8 = if (self.checksum) |cs| &cs else &.{};
+        try sedes.writeString(checksum, writer);
+
+        {
+            var v: u32 = 0;
+            v <<= 1;
+            v += if (self.attributes.read) 1 else 0;
+            v <<= 1;
+            v += if (self.attributes.write) 1 else 0;
+            v <<= 1;
+            v += if (self.attributes.execute) 1 else 0;
+            try sedes.writeInt(u32, v, writer);
+        }
+
+        try sedes.writeInt(u32, self.timestamp, writer);
     }
 
     pub fn print(self: Self, log: *const rubr.log.Log) !void {
