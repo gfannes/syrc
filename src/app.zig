@@ -1,6 +1,7 @@
 const std = @import("std");
 const cli = @import("cli.zig");
 const rubr = @import("rubr.zig");
+const tree = @import("tree.zig");
 
 pub const Error = error{
     ExpectedIp,
@@ -37,11 +38,25 @@ pub const App = struct {
         var walker = rubr.walker.Walker.init(self.a);
         defer walker.deinit();
 
-        var cb = struct {
+        const CollectFileStates = struct {
             const My = @This();
+            const FileStates = std.ArrayList(tree.FileState);
 
             a: std.mem.Allocator,
             total_size: u64 = 0,
+            file_states: FileStates,
+
+            fn init(a: std.mem.Allocator) My {
+                return My{ .a = a, .file_states = FileStates.init(a) };
+            }
+            fn deinit(my: *My) void {
+                for (my.file_states.items) |item| {
+                    my.a.free(item.path);
+                    if (item.data) |data|
+                        my.a.free(data);
+                }
+                my.file_states.deinit();
+            }
 
             pub fn call(my: *My, dir: std.fs.Dir, path: []const u8, offset: ?rubr.walker.Offsets, kind: rubr.walker.Kind) !void {
                 _ = offset;
@@ -58,10 +73,19 @@ pub const App = struct {
                     const r = file.reader();
 
                     const content = try r.readAllAlloc(my.a, my_size);
-                    defer my.a.free(content);
+
+                    const file_state = tree.FileState{
+                        .path = try my.a.dupe(u8, path),
+                        .data = content,
+                    };
+                    try my.file_states.append(file_state);
                 }
             }
-        }{ .a = self.a };
+        };
+
+        var cb = CollectFileStates.init(self.a);
+        defer cb.deinit();
+
         try walker.walk(std.fs.cwd(), &cb);
     }
 };
