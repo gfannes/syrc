@@ -2,10 +2,12 @@ const std = @import("std");
 const cli = @import("cli.zig");
 const rubr = @import("rubr.zig");
 const tree = @import("tree.zig");
+const crypto = @import("crypto.zig");
 
 pub const Error = error{
     ExpectedIp,
     ExpectedPort,
+    ExpectedOffsets,
 };
 
 pub const App = struct {
@@ -35,19 +37,17 @@ pub const App = struct {
             _ = address;
         }
 
-        var walker = rubr.walker.Walker.init(self.a);
-        defer walker.deinit();
-
         const CollectFileStates = struct {
             const My = @This();
             const FileStates = std.ArrayList(tree.FileState);
 
             a: std.mem.Allocator,
-            total_size: u64 = 0,
             file_states: FileStates,
+            walker: rubr.walker.Walker,
+            total_size: u64 = 0,
 
             fn init(a: std.mem.Allocator) My {
-                return My{ .a = a, .file_states = FileStates.init(a) };
+                return My{ .a = a, .file_states = FileStates.init(a), .walker = rubr.walker.Walker.init(a) };
             }
             fn deinit(my: *My) void {
                 for (my.file_states.items) |item| {
@@ -56,12 +56,17 @@ pub const App = struct {
                         my.a.free(data);
                 }
                 my.file_states.deinit();
+                my.walker.deinit();
             }
 
-            pub fn call(my: *My, dir: std.fs.Dir, path: []const u8, offset: ?rubr.walker.Offsets, kind: rubr.walker.Kind) !void {
-                _ = offset;
+            fn collect(my: *My) !void {
+                try my.walker.walk(std.fs.cwd(), my);
+            }
 
+            pub fn call(my: *My, dir: std.fs.Dir, path: []const u8, maybe_offsets: ?rubr.walker.Offsets, kind: rubr.walker.Kind) !void {
                 if (kind == rubr.walker.Kind.File) {
+                    const offsets = maybe_offsets orelse return Error.ExpectedOffsets;
+
                     const file = try dir.openFile(path, .{});
                     defer file.close();
 
@@ -75,17 +80,25 @@ pub const App = struct {
                     const content = try r.readAllAlloc(my.a, my_size);
 
                     const file_state = tree.FileState{
-                        .path = try my.a.dupe(u8, path),
+                        .path = try my.a.dupe(u8, path[offsets.base..]),
                         .data = content,
+                        .checksum = crypto.checksum(content),
                     };
                     try my.file_states.append(file_state);
                 }
             }
         };
 
-        var cb = CollectFileStates.init(self.a);
-        defer cb.deinit();
+        var collect_file_states = CollectFileStates.init(self.a);
+        defer collect_file_states.deinit();
 
-        try walker.walk(std.fs.cwd(), &cb);
+        try collect_file_states.collect();
+
+        for (collect_file_states.file_states.items) |item| {
+            try item.print(self.log);
+        }
+
+        const replicate: tree.Replicate = .{ .base = "tmp", .files = collect_file_states.file_states.items };
+        _ = replicate;
     }
 };

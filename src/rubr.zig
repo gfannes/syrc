@@ -52,6 +52,11 @@ pub const walker = struct {
             self._ignore_stack.deinit();
         }
 
+        // cb() is passed:
+        // - dir: std.fs.Dir
+        // - path: full path of file/folder
+        // - offsets: optional offsets for basename and filename. Only for the toplevel Enter/Leave is this null to avoid out of bound reading
+        // - kind: Enter/Leave/File
         pub fn walk(self: *Walker, basedir: std.fs.Dir, cb: anytype) !void {
             self._path = try basedir.realpath(".", &self._buffer);
             self._base = self._path.len + 1;
