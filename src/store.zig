@@ -29,6 +29,7 @@ pub const Store = struct {
     // https://cfengine.com/blog/2024/efficient-data-copying-on-modern-linux/
     // Use sendfile() or copy_file_range()
     pub fn extract(self: *Self, key: Key, filename: []const u8) !bool {
+        _ = filename;
         if (self.dir) |dir| {
             const subdir = toSubdir(key);
             if (dir.openFile(subdir, .{})) |file| {

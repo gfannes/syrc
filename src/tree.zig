@@ -22,7 +22,21 @@ pub const Replicate = struct {
             try sedes.writeComposite(file, writer);
         }
     }
+    pub fn wri(self: Self, writer: anytype) !void {
+        try writer.leaf(self.base);
+    }
 };
+
+test "tree.Replicate" {
+    const ut = std.testing;
+
+    const file = try std.fs.cwd().createFile("replicate.dat", .{});
+    defer file.close();
+
+    const w = sedes.Writ.init(file);
+    _ = w;
+    try ut.expect(true);
+}
 
 pub const FileState = struct {
     const Self = @This();
