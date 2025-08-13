@@ -14,11 +14,6 @@ pub const Error = error{
 };
 
 // Util for working with a SimpleWriter
-pub fn writeInt(T: type, value: T, sw: anytype) !void {
-    var buffer: [@sizeOf(T)]u8 = undefined;
-    std.mem.writeInt(T, &buffer, value, .big);
-    try sw.writeAll(&buffer);
-}
 pub fn writeVLC(u: anytype, sw: anytype) !void {
     var buffer: [8]u8 = undefined;
     var len: usize = 0;
@@ -40,17 +35,18 @@ pub fn writeVLC(u: anytype, sw: anytype) !void {
 
     try sw.writeAll(buffer[0..len]);
 }
-pub fn writeString(str: []const u8, sw: anytype) !void {
-    const len = std.math.cast(u32, str.len) orelse return Error.TooLarge;
-    try writeInt(u32, len, sw);
-    try sw.writeAll(str);
-}
-pub fn writeComposite(obj: anytype, sw: anytype) !void {
-    var counter = Counter{};
-    try obj.write(&counter);
-    const size = std.math.cast(u32, counter.size) orelse return Error.TooLarge;
-    try writeInt(u32, size, sw);
-    try obj.write(sw);
+pub fn readVLC(u: anytype, sr: anytype) !void {
+    var uu: u128 = 0;
+    var go: bool = true;
+    while (go) {
+        var ary: [1]u8 = undefined;
+        try sr.readAll(&ary);
+        const data: u7 = @truncate(ary[0]);
+        uu <<= 7;
+        uu |= @as(u128, data);
+        go = ary[0] >> 7;
+    }
+    u.* = std.math.cast(@TypeOf(u.*), uu) orelse return Error.TooLarge;
 }
 
 // SimpleWriter that counts the byte size of a leaf
@@ -78,7 +74,7 @@ pub const TreeWriter = struct {
             try obj.leaf(&counter);
 
             const type_id = comptime getTypeId(T);
-            if (comptime !util.isOdd(type_id)) @compileError(std.fmt.comptimePrint("Leaf '{s}' should have odd TypeId, not {},", .{@typeName(T), type_id}));
+            if (comptime !util.isOdd(type_id)) @compileError(std.fmt.comptimePrint("Leaf '{s}' should have odd TypeId, not {},", .{ @typeName(T), type_id }));
             try writeVLC(type_id, self.out);
             try writeVLC(counter.size, self.out);
             try obj.leaf(self.out);
@@ -87,7 +83,7 @@ pub const TreeWriter = struct {
     pub fn composite(self: Self, obj: anytype) !void {
         const T = @TypeOf(obj);
         const type_id = comptime getTypeId(T);
-        if (comptime !util.isEven(type_id)) @compileError(std.fmt.comptimePrint("Composite '{s}' should have even TypeId, not {},", .{@typeName(T), type_id}));
+        if (comptime !util.isEven(type_id)) @compileError(std.fmt.comptimePrint("Composite '{s}' should have even TypeId, not {},", .{ @typeName(T), type_id }));
         try writeVLC(type_id, self.out);
         try obj.composite(self);
         try writeVLC(close, self.out);
@@ -118,6 +114,24 @@ test "TreeWriter.composite" {
     const comp = Composite{};
     try tw.composite(comp);
 }
+
+pub const TreeReader = struct {
+    const Self = @This();
+    in: std.fs.File,
+    type_id: ?TypeId = null,
+    pub fn leaf(self: *Self, obj: anytype) !bool {
+        if (self.type_id == null)
+            self.type_id = try readVLC(self.in);
+        const type_id = self.type_id orelse unreachable;
+
+        if (getTypeIdOf(obj) != type_id)
+            return false;
+
+        try obj.readLeaf(self.in);
+
+        return true;
+    }
+};
 
 // Wrapper classes for primitives to support obj.leaf()
 const String = struct {
