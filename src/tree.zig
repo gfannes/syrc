@@ -14,29 +14,14 @@ pub const Replicate = struct {
     base: []const u8,
     files: []const FileState = &.{},
 
-    pub fn write(self: Self, writer: anytype) !void {
-        try sedes.writeString(self.base, writer);
-        try sedes.writeInt(u32, @sizeOf(usize), writer);
-        try sedes.writeInt(usize, self.files.len, writer);
+    pub fn composite(self: Self, tw: anytype) !void {
+        try tw.leaf(self.base);
+        try tw.leaf(self.files.len);
         for (self.files) |file| {
-            try sedes.writeComposite(file, writer);
+            try tw.composite(file);
         }
     }
-    pub fn wri(self: Self, writer: anytype) !void {
-        try writer.leaf(self.base);
-    }
 };
-
-test "tree.Replicate" {
-    const ut = std.testing;
-
-    const file = try std.fs.cwd().createFile("replicate.dat", .{});
-    defer file.close();
-
-    const w = sedes.Writ.init(file);
-    _ = w;
-    try ut.expect(true);
-}
 
 pub const FileState = struct {
     const Self = @This();
@@ -47,24 +32,24 @@ pub const FileState = struct {
     attributes: Attributes = .{},
     timestamp: Timestamp = 0,
 
-    pub fn write(self: Self, writer: anytype) !void {
-        try sedes.writeString(self.path, writer);
+    pub fn composite(self: Self, tw: anytype) !void {
+        try tw.leaf(self.path);
 
         const checksum: []const u8 = if (self.checksum) |cs| &cs else &.{};
-        try sedes.writeString(checksum, writer);
+        try tw.leaf(checksum);
 
         {
-            var v: u32 = 0;
-            v <<= 1;
-            v += if (self.attributes.read) 1 else 0;
-            v <<= 1;
-            v += if (self.attributes.write) 1 else 0;
-            v <<= 1;
-            v += if (self.attributes.execute) 1 else 0;
-            try sedes.writeInt(u32, v, writer);
+            var flags: u3 = 0;
+            flags <<= 1;
+            flags += if (self.attributes.read) 1 else 0;
+            flags <<= 1;
+            flags += if (self.attributes.write) 1 else 0;
+            flags <<= 1;
+            flags += if (self.attributes.execute) 1 else 0;
+            try tw.leaf(flags);
         }
 
-        try sedes.writeInt(u32, self.timestamp, writer);
+        try tw.leaf(self.timestamp);
     }
 
     pub fn print(self: Self, log: *const rubr.log.Log) !void {

@@ -2,239 +2,159 @@ const std = @import("std");
 const tree = @import("tree.zig");
 const util = @import("util.zig");
 
+// sw: SimpleWriter
+// - sw.writeAll()
+// tw: TreeWriter
+// - tw.leaf()
+// - tw.composite()
+
 pub const Error = error{
     TooLarge,
     ExpectedTypeId,
 };
 
-pub fn writeInt(T: type, value: T, writer: anytype) !void {
+// Util for working with a SimpleWriter
+pub fn writeInt(T: type, value: T, sw: anytype) !void {
     var buffer: [@sizeOf(T)]u8 = undefined;
     std.mem.writeInt(T, &buffer, value, .big);
-    try writer.writeAll(&buffer);
+    try sw.writeAll(&buffer);
 }
-pub fn writeString(str: []const u8, writer: anytype) !void {
+pub fn writeVLC(u: anytype, sw: anytype) !void {
+    var buffer: [8]u8 = undefined;
+    var len: usize = 0;
+    {
+        var uu: u128 = u;
+        for (&buffer) |*byte| {
+            len += 1;
+
+            const data: u7 = @truncate(uu);
+            uu >>= 7;
+
+            if (uu == 0) {
+                byte.* = @as(u8, data);
+                break;
+            }
+            byte.* = (@as(u8, 1) << 7) | data;
+        }
+    }
+
+    try sw.writeAll(buffer[0..len]);
+}
+pub fn writeString(str: []const u8, sw: anytype) !void {
     const len = std.math.cast(u32, str.len) orelse return Error.TooLarge;
-    try writeInt(u32, len, writer);
-    try writer.writeAll(str);
+    try writeInt(u32, len, sw);
+    try sw.writeAll(str);
 }
-pub fn writeComposite(obj: anytype, writer: anytype) !void {
+pub fn writeComposite(obj: anytype, sw: anytype) !void {
     var counter = Counter{};
     try obj.write(&counter);
     const size = std.math.cast(u32, counter.size) orelse return Error.TooLarge;
-    try writeInt(u32, size, writer);
-    try obj.write(writer);
+    try writeInt(u32, size, sw);
+    try obj.write(sw);
 }
 
-pub const Counter = struct {
+// SimpleWriter that counts the byte size of a leaf
+const Counter = struct {
     const Self = @This();
-
-    // Byte count of all data seen, including the Ocl.open() or Ocl.leaf()
     size: usize = 0,
-    checksum: u64 = 0,
-    id: ?u14 = null,
-
     pub fn writeAll(self: *Self, ary: []const u8) !void {
         self.size += ary.len;
     }
-    pub fn leaf(self: *Self, obj: anytype) !void {
-        const T = @TypeOf(obj);
-        if (comptime util.isStringType(T)) {
-            try self.leaf(String.init(obj));
-        } else {
-            if (self.id == null) {
-                self.id = getLeafType(@TypeOf(obj));
-            }
-            self.size += 8;
-            try obj.wri(self);
-        }
-    }
-    pub fn composite(self: *Self, obj: anytype) !void {
-        if (self.id == null) {
-            self.id = getCompositeType(@TypeOf(obj));
-        }
-        self.size += 8;
-        try obj.wri(self);
-        self.size += 8;
-    }
 };
 
-pub const Writer = struct {
-    const Self = @This();
-
-    pub fn init() Self {
-        return Self{};
-    }
-    pub fn deinit(self: *Self) void {
-        _ = self;
-    }
-
-    pub fn write(self: *Self, obj: anytype, id: u32, writer: anytype) !void {
-        _ = self;
-
-        const version: u32 = 1;
-        try writeInt(u32, version, writer);
-        try writeInt(u32, getType(@TypeOf(obj)), writer);
-        try writeInt(u32, id, writer);
-
-        try obj.write(writer);
-    }
-};
-
-pub const Writ = struct {
+pub const TreeWriter = struct {
     const Self = @This();
 
     out: std.fs.File,
 
-    pub fn init(out: std.fs.File) Self {
-        return Self{ .out = out };
-    }
-
-    pub fn writeAll(self: Self, data: []const u8) !void {
-        try self.out.writeAll(data);
-    }
-
-    pub fn composite(self: Self, obj: anytype) !void {
-        var counter = Counter{};
-        try counter.composite(obj);
-
-        const id = counter.id orelse return Error.ExpectedTypeId;
-        // We remove the size for Ocl.open()
-        const size = std.math.cast(u48, counter.size - 8) orelse return Error.TooLarge;
-
-        try Ocl.open(id, size).write(self);
-        try obj.wri(self);
-        try Ocl.close(id, @truncate(counter.checksum)).write(self);
-    }
     pub fn leaf(self: Self, obj: anytype) !void {
         const T = @TypeOf(obj);
         if (comptime util.isStringType(T)) {
-            try self.leaf(String.init(obj));
+            try self.leaf(String{ .str = obj });
+        } else if (comptime util.isUIntType(T)) |_| {
+            try self.leaf(UInt{ .u = obj });
         } else {
             var counter = Counter{};
-            try counter.leaf(obj);
+            try obj.leaf(&counter);
 
-            const id = counter.id orelse return Error.ExpectedTypeId;
-            // We remove the size for Ocl.open()
-            const size = std.math.cast(u48, counter.size - 8) orelse return Error.TooLarge;
-
-            try Ocl.leaf(id, size).write(self);
-            try obj.wri(self);
+            const type_id = comptime getTypeId(T);
+            if (comptime !util.isOdd(type_id)) @compileError(std.fmt.comptimePrint("Leaf '{s}' should have odd TypeId, not {},", .{@typeName(T), type_id}));
+            try writeVLC(type_id, self.out);
+            try writeVLC(counter.size, self.out);
+            try obj.leaf(self.out);
         }
     }
+    pub fn composite(self: Self, obj: anytype) !void {
+        const T = @TypeOf(obj);
+        const type_id = comptime getTypeId(T);
+        if (comptime !util.isEven(type_id)) @compileError(std.fmt.comptimePrint("Composite '{s}' should have even TypeId, not {},", .{@typeName(T), type_id}));
+        try writeVLC(type_id, self.out);
+        try obj.composite(self);
+        try writeVLC(close, self.out);
+    }
 };
-
-test "Writ.leaf" {
-    const file = try std.fs.cwd().createFile("string.dat", .{});
+test "TreeWriter.leaf" {
+    const file = try std.fs.cwd().createFile("leaf.dat", .{});
     defer file.close();
 
-    const w = Writ.init(file);
-    try w.leaf("test");
+    const tw = TreeWriter{ .out = file };
+    try tw.leaf("string");
+    try tw.leaf(@as(u32, 1234));
 }
 
 const Composite = struct {
     const Self = @This();
     str: []const u8 = "composite",
-    fn wri(self: Self, writer: anytype) !void {
-        try writer.leaf(self.str);
+    fn composite(self: Self, tw: anytype) !void {
+        try tw.leaf(self.str);
     }
 };
-test "Writ.composite" {
+test "TreeWriter.composite" {
     const file = try std.fs.cwd().createFile("composite.dat", .{});
     defer file.close();
 
-    const w = Writ.init(file);
+    const tw = TreeWriter{ .out = file };
 
     const comp = Composite{};
-    try w.composite(comp);
+    try tw.composite(comp);
 }
 
-const Ocl = struct {
-    const Self = @This();
-    const Size = u48;
-    const Checksum = u48;
-    const Data = union(enum) {
-        open: Size,
-        close: Checksum,
-        leaf: Size,
-    };
-
-    id: u14,
-    data: Data,
-
-    pub fn open(id: u14, size: u48) Self {
-        return Self{ .id = id, .data = .{ .open = size } };
-    }
-    pub fn close(id: u14, checksum: u48) Self {
-        return Self{ .id = id, .data = .{ .close = checksum } };
-    }
-    pub fn leaf(id: u14, size: u48) Self {
-        return Self{ .id = id, .data = .{ .leaf = size } };
-    }
-
-    pub fn write(self: Self, writer: anytype) !void {
-        try writeInt(u64, self.pack(), writer);
-    }
-
-    fn pack(self: Self) u64 {
-        var ocl: u2 = undefined;
-        var data: u48 = undefined;
-        switch (self.data) {
-            .open => |size| {
-                ocl = 1;
-                data = size;
-            },
-            .close => |checksum| {
-                ocl = 2;
-                data = checksum;
-            },
-            .leaf => |size| {
-                ocl = 3;
-                data = size;
-            },
-        }
-        return (@as(u64, ocl) << 62) | (@as(u64, self.id) << 48) | (@as(u64, data));
-    }
-};
-
-pub const Reader = struct {
-    const Self = @This();
-
-    pub fn init() Self {
-        return Self{};
-    }
-    pub fn deinit(self: *Self) void {
-        _ = self;
-    }
-};
-
+// Wrapper classes for primitives to support obj.leaf()
 const String = struct {
     const Self = @This();
     str: []const u8,
-    fn init(str: []const u8) Self {
-        return Self{ .str = str };
+    fn leaf(self: Self, sw: anytype) !void {
+        try sw.writeAll(self.str);
     }
-    fn wri(self: Self, writer: anytype) !void {
-        try writer.writeAll(self.str);
+};
+const UInt = struct {
+    const Self = @This();
+    u: u128,
+    fn leaf(self: Self, sw: anytype) !void {
+        try writeVLC(self.u, sw);
     }
 };
 
-fn getLeafType(comptime T: type) u14 {
-    return switch (T) {
-        String => 1,
-        else => @compileError("Unsupported leaf type '" ++ @typeName(T) ++ "'"),
-    };
-}
-fn getCompositeType(comptime T: type) u14 {
-    return switch (util.baseType(T)) {
-        tree.Replicate => 1,
-        Composite => 1024,
-        else => @compileError("Unsupported composite type '" ++ @typeName(T) ++ "'"),
-    };
-}
+const TypeId = usize;
+const stop = 0;
+const close = 1;
+fn getTypeId(comptime T: type) TypeId {
+    const type_id = switch (util.baseType(T)) {
+        // Composites are even
+        tree.Replicate => 2,
+        tree.FileState => 4,
+        Composite => 6,
 
-fn getType(comptime T: type) u32 {
-    return switch (util.baseType(T)) {
-        tree.Replicate => 1,
+        // Leafs are odd
+        String => 3,
+        UInt => 5,
+
         else => @compileError("Unsupported type '" ++ @typeName(T) ++ "'"),
     };
+    if (type_id == 0 or type_id == 1)
+        @compileError("TypeId 0 and 1 are reserved");
+    return type_id;
+}
+fn getTypeIdOf(obj: anytype) TypeId {
+    return getTypeId(@TypeOf(obj));
 }

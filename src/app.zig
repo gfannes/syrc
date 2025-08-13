@@ -101,12 +101,11 @@ pub const App = struct {
 
         const replicate: tree.Replicate = .{ .base = "tmp", .files = collect_file_states.file_states.items };
 
-        var writer = sedes.Writer.init();
-        defer writer.deinit();
-
         const file = try std.fs.cwd().createFile("output.dat", .{});
         defer file.close();
 
-        try writer.write(&replicate, 123, file);
+        const tw = sedes.TreeWriter{ .out = file };
+
+        try tw.composite(&replicate);
     }
 };
