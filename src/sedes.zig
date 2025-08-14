@@ -14,6 +14,17 @@ pub const Error = error{
 };
 
 // Util for working with a SimpleWriter
+pub fn writeUInt(u: anytype, sw: anytype) !void {
+    const T = @TypeOf(u);
+    const len = (@bitSizeOf(T) - @clz(u) + 7) / 8;
+    var buffer: [8]u8 = undefined;
+    var uu: u128 = u;
+    for (0..len) |ix| {
+        buffer[len - ix - 1] = @truncate(uu);
+        uu >>= 8;
+    }
+    try sw.writeAll(buffer[0..len]);
+}
 pub fn writeVLC(u: anytype, sw: anytype) !void {
     var buffer: [8]u8 = undefined;
     var len: usize = 0;
@@ -145,7 +156,7 @@ const UInt = struct {
     const Self = @This();
     u: u128,
     fn leaf(self: Self, sw: anytype) !void {
-        try writeVLC(self.u, sw);
+        try writeUInt(self.u, sw);
     }
 };
 
