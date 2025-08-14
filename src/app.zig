@@ -106,6 +106,6 @@ pub const App = struct {
 
         const tw = sedes.TreeWriter{ .out = file };
 
-        try tw.composite(&replicate);
+        try tw.writeComposite(&replicate);
     }
 };

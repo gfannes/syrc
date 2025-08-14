@@ -14,11 +14,11 @@ pub const Replicate = struct {
     base: []const u8,
     files: []const FileState = &.{},
 
-    pub fn composite(self: Self, tw: anytype) !void {
-        try tw.leaf(self.base);
-        try tw.leaf(self.files.len);
+    pub fn writeComposite(self: Self, tw: anytype) !void {
+        try tw.writeLeaf(self.base);
+        try tw.writeLeaf(self.files.len);
         for (self.files) |file| {
-            try tw.composite(file);
+            try tw.writeComposite(file);
         }
     }
 };
@@ -32,11 +32,11 @@ pub const FileState = struct {
     attributes: Attributes = .{},
     timestamp: Timestamp = 0,
 
-    pub fn composite(self: Self, tw: anytype) !void {
-        try tw.leaf(self.path);
+    pub fn writeComposite(self: Self, tw: anytype) !void {
+        try tw.writeLeaf(self.path);
 
         const checksum: []const u8 = if (self.checksum) |cs| &cs else &.{};
-        try tw.leaf(checksum);
+        try tw.writeLeaf(checksum);
 
         {
             var flags: u3 = 0;
@@ -46,10 +46,10 @@ pub const FileState = struct {
             flags += if (self.attributes.write) 1 else 0;
             flags <<= 1;
             flags += if (self.attributes.execute) 1 else 0;
-            try tw.leaf(flags);
+            try tw.writeLeaf(flags);
         }
 
-        try tw.leaf(self.timestamp);
+        try tw.writeLeaf(self.timestamp);
     }
 
     pub fn print(self: Self, log: *const rubr.log.Log) !void {
