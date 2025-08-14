@@ -27,22 +27,18 @@ pub fn writeUInt(u: anytype, sw: anytype) !void {
     try sw.writeAll(buffer[0..len]);
 }
 pub fn writeVLC(u: anytype, sw: anytype) !void {
-    var buffer: [8]u8 = undefined;
-    var len: usize = 0;
-    {
-        var uu: u128 = u;
-        for (&buffer) |*byte| {
-            len += 1;
+    var uu: u128 = u;
+    const max_read_count = (@bitSizeOf(@TypeOf(uu)) + 6) / 7;
 
-            const data: u7 = @truncate(uu);
-            uu >>= 7;
+    var buffer: [max_read_count]u8 = undefined;
+    const len = (@bitSizeOf(@TypeOf(uu)) - @clz(uu) + 6) / 7;
+    for (0..len)|ix|{
+        const data: u7 = @truncate(uu);
+        uu >>= 7;
 
-            if (uu == 0) {
-                byte.* = @as(u8, data);
-                break;
-            }
-            byte.* = (@as(u8, 1) << 7) | data;
-        }
+        const msbit:u8 = if (ix == 0) 0x00 else 0x80;
+        
+        buffer[len-ix-1] = msbit | @as(u8, data);
     }
 
     try sw.writeAll(buffer[0..len]);
@@ -56,12 +52,13 @@ pub fn readVLC(T: type, sr: anytype) !T {
         const count = try sr.readAll(&ary);
         if (count == 0)
             return Error.EndOfStream;
-        const data: u7 = @truncate(ary[0]);
+        const byte = ary[0];
+        const data: u7 = @truncate(byte);
         uu <<= 7;
         uu |= @as(u128, data);
 
         // Check msbit to see if we need to continue
-        const msbit = ary[0] >> 7;
+        const msbit = byte >> 7;
         if (msbit == 0)
             break;
 
@@ -166,6 +163,7 @@ test "leaf" {
 
         var uint = UInt{};
         try ut.expect(try tr.readLeaf(&uint));
+        try ut.expectEqual(uint.u, 1234);
     }
 }
 
@@ -202,7 +200,7 @@ const UInt = struct {
         // try writeUInt(self.u, sw);
         try writeVLC(self.u, sw);
     }
-    fn readLeaf(self:*Self, sr:anytype)!void{
+    fn readLeaf(self: *Self, sr: anytype) !void {
         self.u = try readVLC(@TypeOf(self.u), sr);
     }
 };
