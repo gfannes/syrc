@@ -26,19 +26,33 @@ pub fn writeUInt(u: anytype, sw: anytype) !void {
     }
     try sw.writeAll(buffer[0..len]);
 }
+pub fn readUInt(T: type, size: usize, sr: anytype) !T {
+    if (size > @sizeOf(T))
+        return Error.TooLarge;
+    var buffer: [@sizeOf(T)]u8 = undefined;
+    const slice = buffer[0..size];
+    if (try sr.readAll(slice) != size)
+        return Error.EndOfStream;
+    var u: T = 0;
+    for (slice) |byte| {
+        u <<= 8;
+        u |= @as(T, byte);
+    }
+    return u;
+}
 pub fn writeVLC(u: anytype, sw: anytype) !void {
     var uu: u128 = u;
     const max_read_count = (@bitSizeOf(@TypeOf(uu)) + 6) / 7;
 
     var buffer: [max_read_count]u8 = undefined;
     const len = (@bitSizeOf(@TypeOf(uu)) - @clz(uu) + 6) / 7;
-    for (0..len)|ix|{
+    for (0..len) |ix| {
         const data: u7 = @truncate(uu);
         uu >>= 7;
 
-        const msbit:u8 = if (ix == 0) 0x00 else 0x80;
-        
-        buffer[len-ix-1] = msbit | @as(u8, data);
+        const msbit: u8 = if (ix == 0) 0x00 else 0x80;
+
+        buffer[len - ix - 1] = msbit | @as(u8, data);
     }
 
     try sw.writeAll(buffer[0..len]);
@@ -116,6 +130,7 @@ pub const TreeReader = struct {
         size: usize = 0,
     };
     in: std.fs.File,
+    a: std.mem.Allocator,
     header: ?Header = null,
     pub fn readLeaf(self: *Self, obj: anytype) !bool {
         const header = try self.readHeader();
@@ -125,7 +140,8 @@ pub const TreeReader = struct {
         if (getTypeIdOf(obj) != header.type_id)
             return false;
 
-        try obj.readLeaf(self.in);
+        try obj.readLeaf(header.size, self.in, self.a);
+        self.header = null;
 
         return true;
     }
@@ -159,11 +175,16 @@ test "leaf" {
         const file = try std.fs.cwd().openFile(filename, .{});
         defer file.close();
 
-        var tr = TreeReader{ .in = file };
+        var tr = TreeReader{ .in = file, .a = ut.allocator };
 
         var uint = UInt{};
         try ut.expect(try tr.readLeaf(&uint));
         try ut.expectEqual(uint.u, 1234);
+
+        var string = String{};
+        try ut.expect(try tr.readLeaf(&string));
+        defer ut.allocator.free(string.str);
+        try ut.expectEqualStrings("string", string.str);
     }
 }
 
@@ -187,21 +208,25 @@ test "composite" {
 // Wrapper classes for primitives to support obj.writeLeaf()
 const String = struct {
     const Self = @This();
-    str: []const u8,
+    str: []const u8 = &.{},
     fn writeLeaf(self: Self, sw: anytype) !void {
         try sw.writeAll(self.str);
+    }
+    fn readLeaf(self: *Self, size: usize, sr: anytype, a: std.mem.Allocator) !void {
+        const slice = try a.alloc(u8, size);
+        if (try sr.readAll(slice) != size)
+            return Error.EndOfStream;
+        self.str = slice;
     }
 };
 const UInt = struct {
     const Self = @This();
     u: u128 = 0,
     fn writeLeaf(self: Self, sw: anytype) !void {
-        // &todo: Switch back to writeUInt() once readUInt() is implemented
-        // try writeUInt(self.u, sw);
-        try writeVLC(self.u, sw);
+        try writeUInt(self.u, sw);
     }
-    fn readLeaf(self: *Self, sr: anytype) !void {
-        self.u = try readVLC(@TypeOf(self.u), sr);
+    fn readLeaf(self: *Self, size: usize, sr: anytype, _: std.mem.Allocator) !void {
+        self.u = try readUInt(@TypeOf(self.u), size, sr);
     }
 };
 
