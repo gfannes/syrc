@@ -129,18 +129,48 @@ pub const TreeReader = struct {
         type_id: TypeId,
         size: usize = 0,
     };
+
     in: std.fs.File,
-    a: std.mem.Allocator,
     header: ?Header = null,
-    pub fn readLeaf(self: *Self, obj: anytype) !bool {
+
+    // Returns false if there is a TypeId mismatch
+    pub fn readLeaf(self: *Self, obj: anytype, ctx: anytype) !bool {
+        const T = @TypeOf(obj.*);
+        if (comptime util.isStringType(T)) {
+            var string = String{};
+            const ret = try self.readLeaf(&string, ctx);
+            obj.* = string.str;
+            return ret;
+        } else if (comptime util.isUIntType(T)) |_| {
+            var uint = UInt{};
+            const ret = try self.readLeaf(&uint, ctx);
+            obj.* = std.math.cast(T, uint.u) orelse return Error.TooLarge;
+            return ret;
+        } else {
+            const header = try self.readHeader();
+
+            if (!isLeaf(header.type_id))
+                return false;
+            if (getTypeIdOf(obj) != header.type_id)
+                return false;
+
+            try obj.readLeaf(header.size, self.in, ctx);
+            self.header = null;
+
+            return true;
+        }
+    }
+
+    // Returns false if there is a TypeId mismatch
+    pub fn readComposite(self: *Self, obj: anytype, ctx: anytype) !bool {
         const header = try self.readHeader();
 
-        if (!isLeaf(header.type_id))
+        if (!isComposite(header.type_id))
             return false;
         if (getTypeIdOf(obj) != header.type_id)
             return false;
 
-        try obj.readLeaf(header.size, self.in, self.a);
+        try obj.readComposite(header.size, self, ctx);
         self.header = null;
 
         return true;
@@ -163,6 +193,8 @@ test "leaf" {
     const ut = std.testing;
 
     const filename = "leaf.dat";
+
+    // Create a file with some leaf data
     {
         const file = try std.fs.cwd().createFile(filename, .{});
         defer file.close();
@@ -171,18 +203,37 @@ test "leaf" {
         try tw.writeLeaf(@as(u32, 1234));
         try tw.writeLeaf("string");
     }
+
+    // Read the content using wrapper classes
     {
         const file = try std.fs.cwd().openFile(filename, .{});
         defer file.close();
 
-        var tr = TreeReader{ .in = file, .a = ut.allocator };
+        var tr = TreeReader{ .in = file };
 
         var uint = UInt{};
-        try ut.expect(try tr.readLeaf(&uint));
+        try ut.expect(try tr.readLeaf(&uint, {}));
         try ut.expectEqual(uint.u, 1234);
 
         var string = String{};
-        try ut.expect(try tr.readLeaf(&string));
+        try ut.expect(try tr.readLeaf(&string, ut.allocator));
+        defer ut.allocator.free(string.str);
+        try ut.expectEqualStrings("string", string.str);
+    }
+
+    // Read the content using primitive data types
+    {
+        const file = try std.fs.cwd().openFile(filename, .{});
+        defer file.close();
+
+        var tr = TreeReader{ .in = file };
+
+        var u: u32 = undefined;
+        try ut.expect(try tr.readLeaf(&u, {}));
+        try ut.expectEqual(u, 1234);
+
+        var string = String{};
+        try ut.expect(try tr.readLeaf(&string, ut.allocator));
         defer ut.allocator.free(string.str);
         try ut.expectEqualStrings("string", string.str);
     }
@@ -193,6 +244,9 @@ const Composite = struct {
     str: []const u8 = "composite",
     fn writeComposite(self: Self, tw: anytype) !void {
         try tw.writeLeaf(self.str);
+    }
+    fn readComposite(self: *Self, tr: anytype, a: std.mem.Allocator) !void {
+        try tr.readLeaf(&self.str, a);
     }
 };
 test "composite" {
@@ -225,7 +279,7 @@ const UInt = struct {
     fn writeLeaf(self: Self, sw: anytype) !void {
         try writeUInt(self.u, sw);
     }
-    fn readLeaf(self: *Self, size: usize, sr: anytype, _: std.mem.Allocator) !void {
+    fn readLeaf(self: *Self, size: usize, sr: anytype, _: void) !void {
         self.u = try readUInt(@TypeOf(self.u), size, sr);
     }
 };
