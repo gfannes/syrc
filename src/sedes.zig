@@ -7,6 +7,9 @@ const util = @import("util.zig");
 // tw: TreeWriter
 // - tw.writeLeaf()
 // - tw.writeComposite()
+// tr: TreeReader
+// - tw.readLeaf()
+// - tw.readComposite()
 
 pub const Error = error{
     TooLarge,
@@ -170,7 +173,7 @@ pub const TreeReader = struct {
         if (getTypeIdOf(obj) != header.type_id)
             return false;
 
-        try obj.readComposite(header.size, self, ctx);
+        try obj.readComposite(self, ctx);
         self.header = null;
 
         return true;

@@ -6,6 +6,12 @@ const util = @import("util.zig");
 
 pub const Error = error{
     TooLarge,
+    ExpectedString,
+    ExpectedSize,
+    ExpectedChecksum,
+    ExpectedFlags,
+    ExpectedTimestamp,
+    ExpectedFileState,
 };
 
 pub const Replicate = struct {
@@ -20,6 +26,19 @@ pub const Replicate = struct {
         for (self.files) |file| {
             try tw.writeComposite(file);
         }
+    }
+    pub fn readComposite(self: *Self, tr: anytype, a: std.mem.Allocator) !void {
+        if (!try tr.readLeaf(&self.base, a))
+            return Error.ExpectedString;
+        var size: usize = undefined;
+        if (!try tr.readLeaf(&size, {}))
+            return Error.ExpectedSize;
+        const files = try a.alloc(FileState, size);
+        for (files) |*file| {
+            if (!try tr.readComposite(file, a))
+                return Error.ExpectedFileState;
+        }
+        self.files = files;
     }
 };
 
@@ -50,6 +69,22 @@ pub const FileState = struct {
         }
 
         try tw.writeLeaf(self.timestamp);
+    }
+    pub fn readComposite(self: *Self, tr: anytype, a: std.mem.Allocator) !void {
+        if (!try tr.readLeaf(&self.path, a))
+            return Error.ExpectedString;
+
+        var checksum: []const u8 = undefined;
+        if (!try tr.readLeaf(&checksum, a))
+            return Error.ExpectedChecksum;
+        a.free(checksum);
+
+        var flags: u3 = undefined;
+        if (!try tr.readLeaf(&flags, {}))
+            return Error.ExpectedFlags;
+
+        if (!try tr.readLeaf(&self.timestamp, {}))
+            return Error.ExpectedTimestamp;
     }
 
     pub fn print(self: Self, log: *const rubr.log.Log) !void {

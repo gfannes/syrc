@@ -9,6 +9,7 @@ pub const Error = error{
     ExpectedIp,
     ExpectedPort,
     ExpectedOffsets,
+    ExpectedReplicate,
 };
 
 pub const App = struct {
@@ -101,11 +102,23 @@ pub const App = struct {
 
         const replicate: tree.Replicate = .{ .base = "tmp", .files = collect_file_states.file_states.items };
 
-        const file = try std.fs.cwd().createFile("output.dat", .{});
-        defer file.close();
+        {
+            const file = try std.fs.cwd().createFile("output.dat", .{});
+            defer file.close();
 
-        const tw = sedes.TreeWriter{ .out = file };
+            const tw = sedes.TreeWriter{ .out = file };
 
-        try tw.writeComposite(&replicate);
+            try tw.writeComposite(&replicate);
+        }
+        {
+            const file = try std.fs.cwd().openFile("output.dat", .{});
+            defer file.close();
+
+            var tr = sedes.TreeReader{ .in = file };
+
+            var rep: tree.Replicate = undefined;
+            if (!try tr.readComposite(&rep, self.a))
+                return Error.ExpectedReplicate;
+        }
     }
 };
