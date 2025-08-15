@@ -45,10 +45,10 @@ pub fn readUInt(T: type, size: usize, sr: anytype) !T {
 }
 pub fn writeVLC(u: anytype, sw: anytype) !void {
     var uu: u128 = u;
-    const max_read_count = (@bitSizeOf(@TypeOf(uu)) + 6) / 7;
+    const max_byte_count = (@bitSizeOf(@TypeOf(uu)) + 6) / 7;
 
-    var buffer: [max_read_count]u8 = undefined;
-    const len = (@bitSizeOf(@TypeOf(uu)) - @clz(uu) + 6) / 7;
+    var buffer: [max_byte_count]u8 = undefined;
+    const len = @max((@bitSizeOf(@TypeOf(uu)) - @clz(uu) + 6) / 7, 1);
     for (0..len) |ix| {
         const data: u7 = @truncate(uu);
         uu >>= 7;
@@ -63,8 +63,8 @@ pub fn writeVLC(u: anytype, sw: anytype) !void {
 // Note: If reading a VLC of type T fails (eg., due to size constraint), there is no roll-back on 'sr'
 pub fn readVLC(T: type, sr: anytype) !T {
     var uu: u128 = 0;
-    const max_read_count = (@bitSizeOf(@TypeOf(uu)) + 6) / 7;
-    for (0..max_read_count) |ix| {
+    const max_byte_count = (@bitSizeOf(@TypeOf(uu)) + 6) / 7;
+    for (0..max_byte_count) |ix| {
         var ary: [1]u8 = undefined;
         const count = try sr.readAll(&ary);
         if (count == 0)
@@ -79,7 +79,7 @@ pub fn readVLC(T: type, sr: anytype) !T {
         if (msbit == 0)
             break;
 
-        if (ix + 1 == max_read_count)
+        if (ix + 1 == max_byte_count)
             return Error.TooLarge;
     }
     return std.math.cast(T, uu) orelse return Error.TooLarge;
@@ -168,13 +168,24 @@ pub const TreeReader = struct {
     pub fn readComposite(self: *Self, obj: anytype, ctx: anytype) !bool {
         const header = try self.readHeader();
 
-        if (!isComposite(header.type_id))
+        if (!isComposite(header.type_id)) {
+            std.debug.print("Expected composite, received {}\n", .{header.type_id});
             return false;
-        if (getTypeIdOf(obj) != header.type_id)
-            return false;
+        }
+        if (getTypeIdOf(obj) != header.type_id) {
+            std.debug.print("Expected {}, found {}\n", .{ getTypeIdOf(obj), header.type_id });
 
-        try obj.readComposite(self, ctx);
+            return false;
+        }
+
         self.header = null;
+        try obj.readComposite(self, ctx);
+
+        const type_id = try readVLC(TypeId, self.in);
+        if (type_id != close) {
+            std.debug.print("Expected close ({}), found {}\n", .{ close, type_id });
+            return false;
+        }
 
         return true;
     }
@@ -312,8 +323,8 @@ fn getTypeIdOf(obj: anytype) TypeId {
 }
 
 fn isLeaf(type_id: TypeId) bool {
-    return util.isOdd(type_id);
+    return util.isOdd(type_id) and type_id >= 3;
 }
 fn isComposite(type_id: TypeId) bool {
-    return util.isEven(type_id);
+    return util.isEven(type_id) and type_id >= 2;
 }

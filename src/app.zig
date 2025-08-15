@@ -117,7 +117,9 @@ pub const App = struct {
             var tr = sedes.TreeReader{ .in = file };
 
             var rep: tree.Replicate = undefined;
-            if (!try tr.readComposite(&rep, self.a))
+            var aa = std.heap.ArenaAllocator.init(self.a);
+            defer aa.deinit();
+            if (!try tr.readComposite(&rep, aa.allocator()))
                 return Error.ExpectedReplicate;
         }
     }

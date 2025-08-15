@@ -30,9 +30,11 @@ pub const Replicate = struct {
     pub fn readComposite(self: *Self, tr: anytype, a: std.mem.Allocator) !void {
         if (!try tr.readLeaf(&self.base, a))
             return Error.ExpectedString;
+
         var size: usize = undefined;
         if (!try tr.readLeaf(&size, {}))
             return Error.ExpectedSize;
+
         const files = try a.alloc(FileState, size);
         for (files) |*file| {
             if (!try tr.readComposite(file, a))
