@@ -13,6 +13,7 @@ pub const Error = error{
     ExpectedFlags,
     ExpectedTimestamp,
     ExpectedFileState,
+    WrongChecksumSize,
 };
 
 pub const Replicate = struct {
@@ -23,6 +24,7 @@ pub const Replicate = struct {
 
     pub fn write(self: Self, parent: *rubr.naft.Node) void {
         var node = parent.node("tree.Replicate");
+        defer node.deinit();
         node.attr("base", self.base);
         for (self.files) |item|
             item.write(&node);
@@ -100,7 +102,11 @@ pub const FileState = struct {
         var checksum: []const u8 = undefined;
         if (!try tr.readLeaf(&checksum, a))
             return Error.ExpectedChecksum;
-        a.free(checksum);
+        if (checksum.len != @sizeOf(crypto.Checksum))
+            return Error.WrongChecksumSize;
+        self.checksum = undefined;
+        if (self.checksum) |*cs|
+            std.mem.copyForwards(u8, cs, checksum);
 
         var flags: u3 = undefined;
         if (!try tr.readLeaf(&flags, {}))
@@ -112,14 +118,15 @@ pub const FileState = struct {
 
     pub fn write(self: Self, parent: *rubr.naft.Node) void {
         var node = parent.node("tree.FileState");
+        defer node.deinit();
         node.attr("path", self.path);
-        if (self.content) |content|
-            node.attr("content", content);
+        // if (self.content) |content|
+        //     node.attr("content", content);
         if (self.checksum) |checksum| {
             var buffer: [2 * 20]u8 = undefined;
             for (checksum, 0..) |byte, ix0| {
                 const ix = 2 * ix0;
-                _=std.fmt.bufPrint(buffer[ix .. ix + 2], "{x:0>2}", .{byte}) catch unreachable;
+                _ = std.fmt.bufPrint(buffer[ix .. ix + 2], "{x:0>2}", .{byte}) catch unreachable;
             }
             node.attr("checksum", &buffer);
         }

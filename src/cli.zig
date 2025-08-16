@@ -26,7 +26,7 @@ pub const Args = struct {
 
     exe_name: []const u8 = &.{},
     print_help: bool = false,
-    verbose: usize = 0,
+    verbose: usize = 1,
     src: ?[]const u8 = null,
     dst: ?[]const u8 = null,
     ip: ?[]const u8 = null,
