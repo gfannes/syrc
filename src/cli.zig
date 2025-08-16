@@ -89,7 +89,7 @@ pub const Args = struct {
         std.debug.print("    -d/--dst      DEST      Remote destination\n", .{});
         std.debug.print("    -a/--ip       ADDRESS   Ip address\n", .{});
         std.debug.print("    -p/--port     PORT      Port to use [optional, default is {}]\n", .{Default.port});
-        std.debug.print("    -m/--model    MODE      Operation mode: 'client', 'server' and 'broker'\n", .{});
+        std.debug.print("    -m/--mode     MODE      Operation mode: 'client', 'server', 'broker' and 'test'\n", .{});
         std.debug.print("Developed by Geert Fannes.\n", .{});
     }
 };

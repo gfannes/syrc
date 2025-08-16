@@ -21,6 +21,13 @@ pub const Replicate = struct {
     base: []const u8,
     files: []const FileState = &.{},
 
+    pub fn write(self: Self, parent: *rubr.naft.Node) void {
+        var node = parent.node("tree.Replicate");
+        node.attr("base", self.base);
+        for (self.files) |item|
+            item.write(&node);
+    }
+
     pub fn writeComposite(self: Self, tw: anytype) !void {
         try tw.writeLeaf(self.base);
         try tw.writeLeaf(self.files.len);
@@ -51,11 +58,21 @@ pub const Replicate = struct {
 pub const FileState = struct {
     const Self = @This();
 
-    path: []const u8,
-    data: ?[]const u8 = null,
+    a: std.mem.Allocator,
+    path: []const u8 = &.{},
+    content: ?[]const u8 = null,
     checksum: ?crypto.Checksum = null,
     attributes: Attributes = .{},
     timestamp: Timestamp = 0,
+
+    pub fn init(a: std.mem.Allocator) Self {
+        return Self{ .a = a };
+    }
+    pub fn deinit(self: *Self) void {
+        self.a.free(self.path);
+        if (self.content) |data|
+            self.a.free(data);
+    }
 
     pub fn writeComposite(self: Self, tw: anytype) !void {
         try tw.writeLeaf(self.path);
@@ -93,17 +110,19 @@ pub const FileState = struct {
             return Error.ExpectedTimestamp;
     }
 
-    pub fn print(self: Self, log: *const rubr.log.Log) !void {
-        try log.print("[FileState](path:{s})", .{self.path});
-        if (self.data) |data|
-            try log.print("(size:{})", .{data.len});
+    pub fn write(self: Self, parent: *rubr.naft.Node) void {
+        var node = parent.node("tree.FileState");
+        node.attr("path", self.path);
+        if (self.content) |content|
+            node.attr("content", content);
         if (self.checksum) |checksum| {
-            try log.print("(checksum:", .{});
-            for (checksum) |byte|
-                try log.print("{x:0>2}", .{byte});
-            try log.print(")", .{});
+            var buffer: [2 * 20]u8 = undefined;
+            for (checksum, 0..) |byte, ix0| {
+                const ix = 2 * ix0;
+                _=std.fmt.bufPrint(buffer[ix .. ix + 2], "{x:0>2}", .{byte}) catch unreachable;
+            }
+            node.attr("checksum", &buffer);
         }
-        try log.print("\n", .{});
     }
 };
 

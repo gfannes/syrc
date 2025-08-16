@@ -46,20 +46,17 @@ pub const App = struct {
     fn runTest(self: *Self) !void {
         var file_states = try self.collectFileStates();
         defer {
-            // &next: Move func to tree.FileState
-            for (file_states.items) |item| {
-                self.a.free(item.path);
-                if (item.data) |data|
-                    self.a.free(data);
-            }
+            for (file_states.items) |*item|
+                item.deinit();
             file_states.deinit();
         }
 
-        for (file_states.items) |item| {
-            try item.print(self.log);
-        }
-
         const replicate: tree.Replicate = .{ .base = "tmp", .files = file_states.items };
+
+        if (self.log.level(1)) |w| {
+            var root = rubr.naft.Node.init(w);
+            replicate.write(&root);
+        }
 
         {
             const file = try std.fs.cwd().createFile("output.dat", .{});
@@ -83,25 +80,58 @@ pub const App = struct {
         }
     }
     fn runServer(self: *Self) !void {
-        var server = try (try self.address()).listen(.{});
+        const addr = try self.address();
+        if (self.log.level(1)) |w|
+            try w.print("Creating server on {}\n", .{addr});
+        var server = try addr.listen(.{});
         defer server.deinit();
 
         while (true) {
+            if (self.log.level(1)) |w|
+                try w.print("Waiting for connection...\n", .{});
+
             var connection = try server.accept();
             defer connection.stream.close();
+            if (self.log.level(1)) |w|
+                try w.print("Received connection {}\n", .{connection.address});
 
             var tr = sedes.TreeReader(std.net.Stream){ .in = connection.stream };
 
-            var rep: tree.Replicate = undefined;
+            var replicate: tree.Replicate = undefined;
             var aa = std.heap.ArenaAllocator.init(self.a);
             defer aa.deinit();
-            if (!try tr.readComposite(&rep, aa.allocator()))
+            if (!try tr.readComposite(&replicate, aa.allocator()))
                 return Error.ExpectedReplicate;
+
+            if (self.log.level(1)) |w| {
+                var root = rubr.naft.Node.init(w);
+                replicate.write(&root);
+            }
         }
     }
     fn runClient(self: *Self) !void {
-        var stream = try std.net.tcpConnectToAddress(try self.address());
+        var file_states = try self.collectFileStates();
+        defer {
+            for (file_states.items) |*item|
+                item.deinit();
+            file_states.deinit();
+        }
+        const replicate: tree.Replicate = .{ .base = "tmp", .files = file_states.items };
+
+        if (self.log.level(1)) |w| {
+            var root = rubr.naft.Node.init(w);
+            replicate.write(&root);
+        }
+
+        const addr = try self.address();
+        if (self.log.level(1)) |w|
+            try w.print("Connecting to {}\n", .{addr});
+        var stream = try std.net.tcpConnectToAddress(addr);
         defer stream.close();
+
+        const tw = sedes.TreeWriter(std.net.Stream){ .out = stream };
+
+        try tw.writeComposite(&replicate);
     }
 
     fn collectFileStates(self: Self) !FileStates {
@@ -117,12 +147,8 @@ pub const App = struct {
                 return My{ .a = a, .file_states = FileStates.init(a), .walker = rubr.walker.Walker.init(a) };
             }
             fn deinit(my: *My) void {
-                // &next: Move func to tree.FileState
-                for (my.file_states.items) |item| {
-                    my.a.free(item.path);
-                    if (item.data) |data|
-                        my.a.free(data);
-                }
+                for (my.file_states.items) |*item|
+                    item.deinit();
                 my.file_states.deinit();
                 my.walker.deinit();
             }
@@ -145,13 +171,12 @@ pub const App = struct {
 
                     const r = file.reader();
 
+                    var file_state = tree.FileState.init(my.a);
+                    file_state.path = try my.a.dupe(u8, path[offsets.base..]);
                     const content = try r.readAllAlloc(my.a, my_size);
+                    file_state.content = content;
+                    file_state.checksum = crypto.checksum(content);
 
-                    const file_state = tree.FileState{
-                        .path = try my.a.dupe(u8, path[offsets.base..]),
-                        .data = content,
-                        .checksum = crypto.checksum(content),
-                    };
                     try my.file_states.append(file_state);
                 }
             }
