@@ -10,10 +10,12 @@ pub const Error = error{
     ExpectedPort,
     ExpectedOffsets,
     ExpectedReplicate,
+    NotImplemented,
 };
 
 pub const App = struct {
     const Self = @This();
+    const FileStates = std.ArrayList(tree.FileState);
 
     a: std.mem.Allocator,
     log: *const rubr.log.Log,
@@ -32,16 +34,80 @@ pub const App = struct {
 
     pub fn run(self: *Self) !void {
         try self.log.info("Running mode {any}\n", .{self.mode});
-        if (self.mode == cli.Mode.Server or self.mode == cli.Mode.Broker) {
-            const ip = self.ip orelse return Error.ExpectedIp;
-            const port = self.port orelse return Error.ExpectedPort;
-            const address = try std.net.Address.resolveIp(ip, port);
-            _ = address;
+
+        switch (self.mode) {
+            cli.Mode.Server => try self.runServer(),
+            cli.Mode.Client => try self.runClient(),
+            cli.Mode.Test => try self.runTest(),
+            cli.Mode.Broker => return Error.NotImplemented,
+        }
+    }
+
+    fn runTest(self: *Self) !void {
+        var file_states = try self.collectFileStates();
+        defer {
+            // &next: Move func to tree.FileState
+            for (file_states.items) |item| {
+                self.a.free(item.path);
+                if (item.data) |data|
+                    self.a.free(data);
+            }
+            file_states.deinit();
         }
 
-        const CollectFileStates = struct {
+        for (file_states.items) |item| {
+            try item.print(self.log);
+        }
+
+        const replicate: tree.Replicate = .{ .base = "tmp", .files = file_states.items };
+
+        {
+            const file = try std.fs.cwd().createFile("output.dat", .{});
+            defer file.close();
+
+            const tw = sedes.TreeWriter{ .out = file };
+
+            try tw.writeComposite(&replicate);
+        }
+        {
+            const file = try std.fs.cwd().openFile("output.dat", .{});
+            defer file.close();
+
+            var tr = sedes.TreeReader{ .in = file };
+
+            var rep: tree.Replicate = undefined;
+            var aa = std.heap.ArenaAllocator.init(self.a);
+            defer aa.deinit();
+            if (!try tr.readComposite(&rep, aa.allocator()))
+                return Error.ExpectedReplicate;
+        }
+    }
+    fn runServer(self: *Self) !void {
+        var server = try (try self.address()).listen(.{});
+        defer server.deinit();
+
+        while (true) {
+            var connection = try server.accept();
+            defer connection.stream.close();
+
+            // &next: Make sedes.TreeReader work with both std.fs.File and std.net.Stream
+            // var tr = sedes.TreeReader{ .in = connection.stream };
+
+            // var rep: tree.Replicate = undefined;
+            // var aa = std.heap.ArenaAllocator.init(self.a);
+            // defer aa.deinit();
+            // if (!try tr.readComposite(&rep, aa.allocator()))
+            //     return Error.ExpectedReplicate;
+        }
+    }
+    fn runClient(self: *Self) !void {
+        var stream = try std.net.tcpConnectToAddress(try self.address());
+        defer stream.close();
+    }
+
+    fn collectFileStates(self: Self) !FileStates {
+        const Collector = struct {
             const My = @This();
-            const FileStates = std.ArrayList(tree.FileState);
 
             a: std.mem.Allocator,
             file_states: FileStates,
@@ -52,6 +118,7 @@ pub const App = struct {
                 return My{ .a = a, .file_states = FileStates.init(a), .walker = rubr.walker.Walker.init(a) };
             }
             fn deinit(my: *My) void {
+                // &next: Move func to tree.FileState
                 for (my.file_states.items) |item| {
                     my.a.free(item.path);
                     if (item.data) |data|
@@ -91,36 +158,20 @@ pub const App = struct {
             }
         };
 
-        var collect_file_states = CollectFileStates.init(self.a);
-        defer collect_file_states.deinit();
+        var collector = Collector.init(self.a);
+        defer collector.deinit();
 
-        try collect_file_states.collect();
+        try collector.collect();
 
-        for (collect_file_states.file_states.items) |item| {
-            try item.print(self.log);
-        }
+        var res = FileStates.init(self.a);
+        std.mem.swap(FileStates, &res, &collector.file_states);
 
-        const replicate: tree.Replicate = .{ .base = "tmp", .files = collect_file_states.file_states.items };
+        return res;
+    }
 
-        {
-            const file = try std.fs.cwd().createFile("output.dat", .{});
-            defer file.close();
-
-            const tw = sedes.TreeWriter{ .out = file };
-
-            try tw.writeComposite(&replicate);
-        }
-        {
-            const file = try std.fs.cwd().openFile("output.dat", .{});
-            defer file.close();
-
-            var tr = sedes.TreeReader{ .in = file };
-
-            var rep: tree.Replicate = undefined;
-            var aa = std.heap.ArenaAllocator.init(self.a);
-            defer aa.deinit();
-            if (!try tr.readComposite(&rep, aa.allocator()))
-                return Error.ExpectedReplicate;
-        }
+    fn address(self: Self) !std.net.Address {
+        const ip = self.ip orelse return Error.ExpectedIp;
+        const port = self.port orelse return Error.ExpectedPort;
+        return try std.net.Address.resolveIp(ip, port);
     }
 };

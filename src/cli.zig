@@ -17,7 +17,7 @@ const Default = struct {
     const port: u16 = 1357;
 };
 
-pub const Mode = enum { Client, Server, Broker };
+pub const Mode = enum { Client, Server, Broker, Test };
 
 pub const Args = struct {
     const Self = @This();
@@ -31,7 +31,7 @@ pub const Args = struct {
     dst: ?[]const u8 = null,
     ip: ?[]const u8 = null,
     port: u16 = Default.port,
-    mode: Mode = Mode.Client,
+    mode: Mode = Mode.Test,
     j: usize,
 
     pub fn init(a: std.mem.Allocator) Self {
@@ -69,6 +69,8 @@ pub const Args = struct {
                     Mode.Server
                 else if (mode.is("brkr", "broker"))
                     Mode.Broker
+                else if (mode.is("test", "test"))
+                    Mode.Test
                 else
                     return Error.ModeFormatError;
             } else {
