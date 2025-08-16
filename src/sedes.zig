@@ -157,8 +157,10 @@ pub const TreeReader = struct {
             if (getTypeIdOf(obj) != header.type_id)
                 return false;
 
-            try obj.readLeaf(header.size, self.in, ctx);
+            const size = header.size;
             self.header = null;
+
+            try obj.readLeaf(size, self.in, ctx);
 
             return true;
         }
@@ -166,40 +168,48 @@ pub const TreeReader = struct {
 
     // Returns false if there is a TypeId mismatch
     pub fn readComposite(self: *Self, obj: anytype, ctx: anytype) !bool {
-        const header = try self.readHeader();
+        {
+            const header = try self.readHeader();
 
-        if (!isComposite(header.type_id)) {
-            std.debug.print("Expected composite, received {}\n", .{header.type_id});
-            return false;
+            if (!isComposite(header.type_id)) {
+                std.debug.print("Expected composite, received {}\n", .{header.type_id});
+                return false;
+            }
+            if (getTypeIdOf(obj) != header.type_id) {
+                std.debug.print("Expected {}, found {}\n", .{ getTypeIdOf(obj), header.type_id });
+                return false;
+            }
+            self.header = null;
         }
-        if (getTypeIdOf(obj) != header.type_id) {
-            std.debug.print("Expected {}, found {}\n", .{ getTypeIdOf(obj), header.type_id });
 
-            return false;
-        }
-
-        self.header = null;
         try obj.readComposite(self, ctx);
 
-        const type_id = try readVLC(TypeId, self.in);
-        if (type_id != close) {
-            std.debug.print("Expected close ({}), found {}\n", .{ close, type_id });
-            return false;
+        {
+            const header = try self.readHeader();
+            if (header.type_id != close) {
+                std.debug.print("Expected close ({}), found {}\n", .{ close, header.type_id });
+                return false;
+            }
+            self.header = null;
         }
 
         return true;
     }
 
-    fn readHeader(self: *Self) !Header {
-        if (self.header) |header| {
+    pub fn readHeader(self: *Self) !Header {
+        if (self.header) |header|
             return header;
-        }
 
         const type_id = try readVLC(TypeId, self.in);
         const size = if (isLeaf(type_id)) try readVLC(usize, self.in) else 0;
         const header = Header{ .type_id = type_id, .size = size };
         self.header = header;
         return header;
+    }
+
+    pub fn isClose(self: *Self) !bool {
+        const header = try self.readHeader();
+        return header.type_id == close;
     }
 };
 

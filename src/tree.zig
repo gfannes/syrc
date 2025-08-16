@@ -6,6 +6,7 @@ const util = @import("util.zig");
 
 pub const Error = error{
     TooLarge,
+    UnexpectedData,
     ExpectedString,
     ExpectedSize,
     ExpectedChecksum,
@@ -41,6 +42,9 @@ pub const Replicate = struct {
                 return Error.ExpectedFileState;
         }
         self.files = files;
+
+        if (!try tr.isClose())
+            return Error.UnexpectedData;
     }
 };
 
