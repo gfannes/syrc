@@ -2,6 +2,8 @@ const std = @import("std");
 const tree = @import("tree.zig");
 const util = @import("util.zig");
 
+// &todo: Move to rubr
+
 // sw: SimpleWriter
 // - sw.writeAll()
 // tw: TreeWriter
@@ -85,133 +87,128 @@ pub fn readVLC(T: type, sr: anytype) !T {
     return std.math.cast(T, uu) orelse return Error.TooLarge;
 }
 
-// SimpleWriter that counts the byte size of a leaf
-const Counter = struct {
-    const Self = @This();
-    size: usize = 0,
-    pub fn writeAll(self: *Self, ary: []const u8) !void {
-        self.size += ary.len;
-    }
-};
+pub fn TreeWriter(Out: anytype) type {
+    return struct {
+        const Self = @This();
 
-pub const TreeWriter = struct {
-    const Self = @This();
+        out: Out,
 
-    out: std.fs.File,
+        pub fn writeLeaf(self: Self, obj: anytype) !void {
+            const T = @TypeOf(obj);
+            if (comptime util.isStringType(T)) {
+                try self.writeLeaf(String{ .str = obj });
+            } else if (comptime util.isUIntType(T)) |_| {
+                try self.writeLeaf(UInt{ .u = obj });
+            } else {
+                var counter = Counter{};
+                try obj.writeLeaf(&counter);
 
-    pub fn writeLeaf(self: Self, obj: anytype) !void {
-        const T = @TypeOf(obj);
-        if (comptime util.isStringType(T)) {
-            try self.writeLeaf(String{ .str = obj });
-        } else if (comptime util.isUIntType(T)) |_| {
-            try self.writeLeaf(UInt{ .u = obj });
-        } else {
-            var counter = Counter{};
-            try obj.writeLeaf(&counter);
-
-            const type_id = comptime getTypeId(T);
-            if (comptime !isLeaf(type_id)) @compileError(std.fmt.comptimePrint("Leaf '{s}' should have odd TypeId, not {},", .{ @typeName(T), type_id }));
-            try writeVLC(type_id, self.out);
-            try writeVLC(counter.size, self.out);
-            try obj.writeLeaf(self.out);
+                const type_id = comptime getTypeId(T);
+                if (comptime !isLeaf(type_id)) @compileError(std.fmt.comptimePrint("Leaf '{s}' should have odd TypeId, not {},", .{ @typeName(T), type_id }));
+                try writeVLC(type_id, self.out);
+                try writeVLC(counter.size, self.out);
+                try obj.writeLeaf(self.out);
+            }
         }
-    }
-    pub fn writeComposite(self: Self, obj: anytype) !void {
-        const T = @TypeOf(obj);
-        const type_id = comptime getTypeId(T);
-        if (comptime !isComposite(type_id)) @compileError(std.fmt.comptimePrint("Composite '{s}' should have even TypeId, not {},", .{ @typeName(T), type_id }));
-        try writeVLC(type_id, self.out);
-        try obj.writeComposite(self);
-        try writeVLC(close, self.out);
-    }
-};
-
-pub const TreeReader = struct {
-    const Self = @This();
-    const Header = struct {
-        type_id: TypeId,
-        size: usize = 0,
+        pub fn writeComposite(self: Self, obj: anytype) !void {
+            const T = @TypeOf(obj);
+            const type_id = comptime getTypeId(T);
+            if (comptime !isComposite(type_id)) @compileError(std.fmt.comptimePrint("Composite '{s}' should have even TypeId, not {},", .{ @typeName(T), type_id }));
+            try writeVLC(type_id, self.out);
+            try obj.writeComposite(self);
+            try writeVLC(close, self.out);
+        }
     };
+}
 
-    in: std.fs.File,
-    header: ?Header = null,
+pub fn TreeReader(In: anytype) type {
+    return struct {
+        const Self = @This();
+        const Header = struct {
+            type_id: TypeId,
+            size: usize = 0,
+        };
 
-    // Returns false if there is a TypeId mismatch
-    pub fn readLeaf(self: *Self, obj: anytype, ctx: anytype) !bool {
-        const T = @TypeOf(obj.*);
-        if (comptime util.isStringType(T)) {
-            var string = String{};
-            const ret = try self.readLeaf(&string, ctx);
-            obj.* = string.str;
-            return ret;
-        } else if (comptime util.isUIntType(T)) |_| {
-            var uint = UInt{};
-            const ret = try self.readLeaf(&uint, ctx);
-            obj.* = std.math.cast(T, uint.u) orelse return Error.TooLarge;
-            return ret;
-        } else {
-            const header = try self.readHeader();
+        in: In,
+        header: ?Header = null,
 
-            if (!isLeaf(header.type_id))
-                return false;
-            if (getTypeIdOf(obj) != header.type_id)
-                return false;
+        // Returns false if there is a TypeId mismatch
+        pub fn readLeaf(self: *Self, obj: anytype, ctx: anytype) !bool {
+            const T = @TypeOf(obj.*);
+            if (comptime util.isStringType(T)) {
+                var string = String{};
+                const ret = try self.readLeaf(&string, ctx);
+                obj.* = string.str;
+                return ret;
+            } else if (comptime util.isUIntType(T)) |_| {
+                var uint = UInt{};
+                const ret = try self.readLeaf(&uint, ctx);
+                obj.* = std.math.cast(T, uint.u) orelse return Error.TooLarge;
+                return ret;
+            } else {
+                const header = try self.readHeader();
 
-            const size = header.size;
-            self.header = null;
+                if (!isLeaf(header.type_id))
+                    return false;
+                if (getTypeIdOf(obj) != header.type_id)
+                    return false;
 
-            try obj.readLeaf(size, self.in, ctx);
+                const size = header.size;
+                self.header = null;
+
+                try obj.readLeaf(size, self.in, ctx);
+
+                return true;
+            }
+        }
+
+        // Returns false if there is a TypeId mismatch
+        pub fn readComposite(self: *Self, obj: anytype, ctx: anytype) !bool {
+            {
+                const header = try self.readHeader();
+
+                if (!isComposite(header.type_id)) {
+                    std.debug.print("Expected composite, received {}\n", .{header.type_id});
+                    return false;
+                }
+                if (getTypeIdOf(obj) != header.type_id) {
+                    std.debug.print("Expected {}, found {}\n", .{ getTypeIdOf(obj), header.type_id });
+                    return false;
+                }
+                self.header = null;
+            }
+
+            try obj.readComposite(self, ctx);
+
+            {
+                const header = try self.readHeader();
+                if (header.type_id != close) {
+                    std.debug.print("Expected close ({}), found {}\n", .{ close, header.type_id });
+                    return false;
+                }
+                self.header = null;
+            }
 
             return true;
         }
-    }
 
-    // Returns false if there is a TypeId mismatch
-    pub fn readComposite(self: *Self, obj: anytype, ctx: anytype) !bool {
-        {
-            const header = try self.readHeader();
+        pub fn readHeader(self: *Self) !Header {
+            if (self.header) |header|
+                return header;
 
-            if (!isComposite(header.type_id)) {
-                std.debug.print("Expected composite, received {}\n", .{header.type_id});
-                return false;
-            }
-            if (getTypeIdOf(obj) != header.type_id) {
-                std.debug.print("Expected {}, found {}\n", .{ getTypeIdOf(obj), header.type_id });
-                return false;
-            }
-            self.header = null;
-        }
-
-        try obj.readComposite(self, ctx);
-
-        {
-            const header = try self.readHeader();
-            if (header.type_id != close) {
-                std.debug.print("Expected close ({}), found {}\n", .{ close, header.type_id });
-                return false;
-            }
-            self.header = null;
-        }
-
-        return true;
-    }
-
-    pub fn readHeader(self: *Self) !Header {
-        if (self.header) |header|
+            const type_id = try readVLC(TypeId, self.in);
+            const size = if (isLeaf(type_id)) try readVLC(usize, self.in) else 0;
+            const header = Header{ .type_id = type_id, .size = size };
+            self.header = header;
             return header;
+        }
 
-        const type_id = try readVLC(TypeId, self.in);
-        const size = if (isLeaf(type_id)) try readVLC(usize, self.in) else 0;
-        const header = Header{ .type_id = type_id, .size = size };
-        self.header = header;
-        return header;
-    }
-
-    pub fn isClose(self: *Self) !bool {
-        const header = try self.readHeader();
-        return header.type_id == close;
-    }
-};
+        pub fn isClose(self: *Self) !bool {
+            const header = try self.readHeader();
+            return header.type_id == close;
+        }
+    };
+}
 
 test "leaf" {
     const ut = std.testing;
@@ -223,7 +220,7 @@ test "leaf" {
         const file = try std.fs.cwd().createFile(filename, .{});
         defer file.close();
 
-        const tw = TreeWriter{ .out = file };
+        const tw = TreeWriter(std.fs.File){ .out = file };
         try tw.writeLeaf(@as(u32, 1234));
         try tw.writeLeaf("string");
     }
@@ -233,7 +230,7 @@ test "leaf" {
         const file = try std.fs.cwd().openFile(filename, .{});
         defer file.close();
 
-        var tr = TreeReader{ .in = file };
+        var tr = TreeReader(std.fs.File){ .in = file };
 
         var uint = UInt{};
         try ut.expect(try tr.readLeaf(&uint, {}));
@@ -250,7 +247,7 @@ test "leaf" {
         const file = try std.fs.cwd().openFile(filename, .{});
         defer file.close();
 
-        var tr = TreeReader{ .in = file };
+        var tr = TreeReader(std.fs.File){ .in = file };
 
         var u: u32 = undefined;
         try ut.expect(try tr.readLeaf(&u, {}));
@@ -277,11 +274,20 @@ test "composite" {
     const file = try std.fs.cwd().createFile("composite.dat", .{});
     defer file.close();
 
-    const tw = TreeWriter{ .out = file };
+    const tw = TreeWriter(std.fs.File){ .out = file };
 
     const comp = Composite{};
     try tw.writeComposite(comp);
 }
+
+// SimpleWriter that counts the byte size of a leaf
+const Counter = struct {
+    const Self = @This();
+    size: usize = 0,
+    pub fn writeAll(self: *Self, ary: []const u8) !void {
+        self.size += ary.len;
+    }
+};
 
 // Wrapper classes for primitives to support obj.writeLeaf()
 const String = struct {

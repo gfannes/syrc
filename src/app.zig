@@ -65,7 +65,7 @@ pub const App = struct {
             const file = try std.fs.cwd().createFile("output.dat", .{});
             defer file.close();
 
-            const tw = sedes.TreeWriter{ .out = file };
+            const tw = sedes.TreeWriter(std.fs.File){ .out = file };
 
             try tw.writeComposite(&replicate);
         }
@@ -73,7 +73,7 @@ pub const App = struct {
             const file = try std.fs.cwd().openFile("output.dat", .{});
             defer file.close();
 
-            var tr = sedes.TreeReader{ .in = file };
+            var tr = sedes.TreeReader(std.fs.File){ .in = file };
 
             var rep: tree.Replicate = undefined;
             var aa = std.heap.ArenaAllocator.init(self.a);
@@ -90,14 +90,13 @@ pub const App = struct {
             var connection = try server.accept();
             defer connection.stream.close();
 
-            // &next: Make sedes.TreeReader work with both std.fs.File and std.net.Stream
-            // var tr = sedes.TreeReader{ .in = connection.stream };
+            var tr = sedes.TreeReader(std.net.Stream){ .in = connection.stream };
 
-            // var rep: tree.Replicate = undefined;
-            // var aa = std.heap.ArenaAllocator.init(self.a);
-            // defer aa.deinit();
-            // if (!try tr.readComposite(&rep, aa.allocator()))
-            //     return Error.ExpectedReplicate;
+            var rep: tree.Replicate = undefined;
+            var aa = std.heap.ArenaAllocator.init(self.a);
+            defer aa.deinit();
+            if (!try tr.readComposite(&rep, aa.allocator()))
+                return Error.ExpectedReplicate;
         }
     }
     fn runClient(self: *Self) !void {
