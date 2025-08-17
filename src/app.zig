@@ -110,29 +110,37 @@ pub const App = struct {
                 var aa = std.heap.ArenaAllocator.init(self.a);
                 defer aa.deinit();
 
+                const a = aa.allocator();
+
                 const header = try tr.readHeader();
                 switch (header.id) {
                     prot.Hello.Id => {
-                        var msg: prot.Hello = undefined;
-                        if (!try tr.readComposite(&msg, header.id, {}))
+                        const T = prot.Hello;
+                        var msg: T = undefined;
+                        if (!try tr.readComposite(&msg, T.Id, {}))
                             return Error.ExpectedHello;
                         try self.printMessage(msg);
                     },
                     prot.Replicate.Id => {
-                        var msg: prot.Replicate = undefined;
-                        if (!try tr.readComposite(&msg, header.id, aa.allocator()))
+                        const T = prot.Replicate;
+                        var msg = T.init(a);
+                        defer msg.deinit();
+                        if (!try tr.readComposite(&msg, T.Id, a))
                             return Error.ExpectedReplicate;
                         try self.printMessage(msg);
                     },
                     prot.Run.Id => {
-                        var msg: prot.Run = undefined;
-                        if (!try tr.readComposite(&msg, header.id, aa.allocator()))
+                        const T = prot.Run;
+                        var msg = T.init(a);
+                        defer msg.deinit();
+                        if (!try tr.readComposite(&msg, T.Id, a))
                             return Error.ExpectedRun;
                         try self.printMessage(msg);
                     },
                     prot.Bye.Id => {
-                        var msg: prot.Bye = undefined;
-                        if (!try tr.readComposite(&msg, header.id, {}))
+                        const T = prot.Bye;
+                        var msg: T = undefined;
+                        if (!try tr.readComposite(&msg, T.Id, {}))
                             return Error.ExpectedBye;
                         try self.printMessage(msg);
 
