@@ -2,19 +2,18 @@ const std = @import("std");
 const cli = @import("cli.zig");
 const rubr = @import("rubr.zig");
 const tree = @import("tree.zig");
+const prot = @import("prot.zig");
 const crypto = @import("crypto.zig");
 
 pub const Error = error{
     ExpectedIp,
     ExpectedPort,
-    ExpectedOffsets,
     ExpectedReplicate,
     NotImplemented,
 };
 
 pub const App = struct {
     const Self = @This();
-    const FileStates = std.ArrayList(tree.FileState);
 
     a: std.mem.Allocator,
     log: *const rubr.log.Log,
@@ -43,14 +42,12 @@ pub const App = struct {
     }
 
     fn runTest(self: *Self) !void {
-        var file_states = try self.collectFileStates();
-        defer {
-            for (file_states.items) |*item|
-                item.deinit();
-            file_states.deinit();
-        }
-
-        const replicate: tree.Replicate = .{ .base = "tmp", .files = file_states.items };
+        var replicate: prot.Replicate = .{
+            .a = self.a,
+            .base = "tmp",
+            .files = try tree.collectFileStates(std.fs.cwd(), self.a),
+        };
+        defer replicate.deinit();
 
         if (self.log.level(1)) |w| {
             var root = rubr.naft.Node.init(w);
@@ -71,7 +68,7 @@ pub const App = struct {
 
             var tr = rubr.comm.TreeReader(std.fs.File){ .in = file };
 
-            var rep: tree.Replicate = undefined;
+            var rep: prot.Replicate = undefined;
             var aa = std.heap.ArenaAllocator.init(self.a);
             defer aa.deinit();
             if (!try tr.readComposite(&rep, 2, aa.allocator()))
@@ -96,7 +93,7 @@ pub const App = struct {
 
             var tr = rubr.comm.TreeReader(std.net.Stream){ .in = connection.stream };
 
-            var replicate: tree.Replicate = undefined;
+            var replicate: prot.Replicate = undefined;
             var aa = std.heap.ArenaAllocator.init(self.a);
             defer aa.deinit();
             if (!try tr.readComposite(&replicate, 2, aa.allocator()))
@@ -109,13 +106,12 @@ pub const App = struct {
         }
     }
     fn runClient(self: *Self) !void {
-        var file_states = try self.collectFileStates();
-        defer {
-            for (file_states.items) |*item|
-                item.deinit();
-            file_states.deinit();
-        }
-        const replicate: tree.Replicate = .{ .base = "tmp", .files = file_states.items };
+        var replicate: prot.Replicate = .{
+            .a = self.a,
+            .base = "tmp",
+            .files = try tree.collectFileStates(std.fs.cwd(), self.a),
+        };
+        defer replicate.deinit();
 
         if (self.log.level(1)) |w| {
             var root = rubr.naft.Node.init(w);
@@ -131,65 +127,6 @@ pub const App = struct {
         const tw = rubr.comm.TreeWriter(std.net.Stream){ .out = stream };
 
         try tw.writeComposite(&replicate, 2);
-    }
-
-    fn collectFileStates(self: Self) !FileStates {
-        const Collector = struct {
-            const My = @This();
-
-            a: std.mem.Allocator,
-            file_states: FileStates,
-            walker: rubr.walker.Walker,
-            total_size: u64 = 0,
-
-            fn init(a: std.mem.Allocator) My {
-                return My{ .a = a, .file_states = FileStates.init(a), .walker = rubr.walker.Walker.init(a) };
-            }
-            fn deinit(my: *My) void {
-                for (my.file_states.items) |*item|
-                    item.deinit();
-                my.file_states.deinit();
-                my.walker.deinit();
-            }
-
-            fn collect(my: *My) !void {
-                try my.walker.walk(std.fs.cwd(), my);
-            }
-
-            pub fn call(my: *My, dir: std.fs.Dir, path: []const u8, maybe_offsets: ?rubr.walker.Offsets, kind: rubr.walker.Kind) !void {
-                if (kind == rubr.walker.Kind.File) {
-                    const offsets = maybe_offsets orelse return Error.ExpectedOffsets;
-
-                    const file = try dir.openFile(path, .{});
-                    defer file.close();
-
-                    const stat = try file.stat();
-                    const my_size = stat.size;
-                    my.total_size += my_size;
-                    std.debug.print("Path: {s}, my size: {}, total_size: {}\n", .{ path, my_size, my.total_size });
-
-                    const r = file.reader();
-
-                    var file_state = tree.FileState.init(my.a);
-                    file_state.path = try my.a.dupe(u8, path[offsets.base..]);
-                    const content = try r.readAllAlloc(my.a, my_size);
-                    file_state.content = content;
-                    file_state.checksum = crypto.checksum(content);
-
-                    try my.file_states.append(file_state);
-                }
-            }
-        };
-
-        var collector = Collector.init(self.a);
-        defer collector.deinit();
-
-        try collector.collect();
-
-        var res = FileStates.init(self.a);
-        std.mem.swap(FileStates, &res, &collector.file_states);
-
-        return res;
     }
 
     fn address(self: Self) !std.net.Address {

@@ -3,58 +3,13 @@ const crypto = @import("crypto.zig");
 const rubr = @import("rubr.zig");
 
 pub const Error = error{
-    TooLarge,
-    UnexpectedData,
     ExpectedString,
-    ExpectedSize,
     ExpectedContent,
     ExpectedChecksum,
     ExpectedFlags,
     ExpectedTimestamp,
-    ExpectedFileState,
+    ExpectedOffsets,
     WrongChecksumSize,
-};
-
-pub const Replicate = struct {
-    const Self = @This();
-
-    base: []const u8,
-    files: []const FileState = &.{},
-
-    pub fn write(self: Self, parent: *rubr.naft.Node) void {
-        var node = parent.node("tree.Replicate");
-        defer node.deinit();
-        node.attr("base", self.base);
-        for (self.files) |item|
-            item.write(&node);
-    }
-
-    pub fn writeComposite(self: Self, tw: anytype) !void {
-        try tw.writeLeaf(self.base, 3);
-        try tw.writeLeaf(self.files.len, 3);
-        for (self.files) |file| {
-            try tw.writeComposite(file, 2);
-        }
-    }
-    pub fn readComposite(self: *Self, tr: anytype, a: std.mem.Allocator) !void {
-        if (!try tr.readLeaf(&self.base, 3, a))
-            return Error.ExpectedString;
-
-        var size: usize = undefined;
-        if (!try tr.readLeaf(&size, 3, {}))
-            return Error.ExpectedSize;
-
-        const files = try a.alloc(FileState, size);
-        for (files) |*file| {
-            file.* = FileState.init(a);
-            if (!try tr.readComposite(file, 2, a))
-                return Error.ExpectedFileState;
-        }
-        self.files = files;
-
-        if (!try tr.isClose())
-            return Error.UnexpectedData;
-    }
 };
 
 pub const FileState = struct {
@@ -156,3 +111,65 @@ pub const Attributes = struct {
 };
 
 pub const Timestamp = u32;
+
+pub const FileStates = std.ArrayList(FileState);
+
+pub fn collectFileStates(dir: std.fs.Dir, a: std.mem.Allocator) !FileStates {
+    const Collector = struct {
+        const My = @This();
+
+        a: std.mem.Allocator,
+        dir: std.fs.Dir,
+        file_states: FileStates,
+        walker: rubr.walker.Walker,
+        total_size: u64 = 0,
+
+        fn init(dirr: std.fs.Dir, aa: std.mem.Allocator) My {
+            return My{ .dir = dirr, .a = aa, .file_states = FileStates.init(aa), .walker = rubr.walker.Walker.init(aa) };
+        }
+        fn deinit(my: *My) void {
+            for (my.file_states.items) |*item|
+                item.deinit();
+            my.file_states.deinit();
+            my.walker.deinit();
+        }
+
+        fn collect(my: *My) !void {
+            try my.walker.walk(std.fs.cwd(), my);
+        }
+
+        pub fn call(my: *My, dirr: std.fs.Dir, path: []const u8, maybe_offsets: ?rubr.walker.Offsets, kind: rubr.walker.Kind) !void {
+            if (kind == rubr.walker.Kind.File) {
+                const offsets = maybe_offsets orelse return Error.ExpectedOffsets;
+
+                const file = try dirr.openFile(path, .{});
+                defer file.close();
+
+                const stat = try file.stat();
+                const my_size = stat.size;
+                my.total_size += my_size;
+                std.debug.print("Path: {s}, my size: {}, total_size: {}\n", .{ path, my_size, my.total_size });
+
+                const r = file.reader();
+
+                var file_state = FileState.init(my.a);
+                file_state.path = try my.a.dupe(u8, path[offsets.base..]);
+                const content = try r.readAllAlloc(my.a, my_size);
+                file_state.content = content;
+                file_state.checksum = crypto.checksum(content);
+
+                try my.file_states.append(file_state);
+            }
+        }
+    };
+
+    var collector = Collector.init(dir, a);
+    defer collector.deinit();
+
+    try collector.collect();
+
+    var res = FileStates.init(a);
+    std.mem.swap(FileStates, &res, &collector.file_states);
+
+    return res;
+}
