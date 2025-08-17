@@ -64,7 +64,7 @@ pub const App = struct {
 
             const tw = sedes.TreeWriter(std.fs.File){ .out = file };
 
-            try tw.writeComposite(&replicate);
+            try tw.writeComposite(&replicate, 2);
         }
         {
             const file = try std.fs.cwd().openFile("output.dat", .{});
@@ -75,7 +75,7 @@ pub const App = struct {
             var rep: tree.Replicate = undefined;
             var aa = std.heap.ArenaAllocator.init(self.a);
             defer aa.deinit();
-            if (!try tr.readComposite(&rep, aa.allocator()))
+            if (!try tr.readComposite(&rep, 2, aa.allocator()))
                 return Error.ExpectedReplicate;
         }
     }
@@ -100,7 +100,7 @@ pub const App = struct {
             var replicate: tree.Replicate = undefined;
             var aa = std.heap.ArenaAllocator.init(self.a);
             defer aa.deinit();
-            if (!try tr.readComposite(&replicate, aa.allocator()))
+            if (!try tr.readComposite(&replicate, 2, aa.allocator()))
                 return Error.ExpectedReplicate;
 
             if (self.log.level(1)) |w| {
@@ -131,7 +131,7 @@ pub const App = struct {
 
         const tw = sedes.TreeWriter(std.net.Stream){ .out = stream };
 
-        try tw.writeComposite(&replicate);
+        try tw.writeComposite(&replicate, 2);
     }
 
     fn collectFileStates(self: Self) !FileStates {
