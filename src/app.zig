@@ -3,7 +3,6 @@ const cli = @import("cli.zig");
 const rubr = @import("rubr.zig");
 const tree = @import("tree.zig");
 const crypto = @import("crypto.zig");
-const sedes = @import("sedes.zig");
 
 pub const Error = error{
     ExpectedIp,
@@ -62,7 +61,7 @@ pub const App = struct {
             const file = try std.fs.cwd().createFile("output.dat", .{});
             defer file.close();
 
-            const tw = sedes.TreeWriter(std.fs.File){ .out = file };
+            const tw = rubr.comm.TreeWriter(std.fs.File){ .out = file };
 
             try tw.writeComposite(&replicate, 2);
         }
@@ -70,7 +69,7 @@ pub const App = struct {
             const file = try std.fs.cwd().openFile("output.dat", .{});
             defer file.close();
 
-            var tr = sedes.TreeReader(std.fs.File){ .in = file };
+            var tr = rubr.comm.TreeReader(std.fs.File){ .in = file };
 
             var rep: tree.Replicate = undefined;
             var aa = std.heap.ArenaAllocator.init(self.a);
@@ -95,7 +94,7 @@ pub const App = struct {
             if (self.log.level(1)) |w|
                 try w.print("Received connection {}\n", .{connection.address});
 
-            var tr = sedes.TreeReader(std.net.Stream){ .in = connection.stream };
+            var tr = rubr.comm.TreeReader(std.net.Stream){ .in = connection.stream };
 
             var replicate: tree.Replicate = undefined;
             var aa = std.heap.ArenaAllocator.init(self.a);
@@ -129,7 +128,7 @@ pub const App = struct {
         var stream = try std.net.tcpConnectToAddress(addr);
         defer stream.close();
 
-        const tw = sedes.TreeWriter(std.net.Stream){ .out = stream };
+        const tw = rubr.comm.TreeWriter(std.net.Stream){ .out = stream };
 
         try tw.writeComposite(&replicate, 2);
     }
