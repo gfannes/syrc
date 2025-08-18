@@ -8,6 +8,8 @@ pub const Error = error{
     ExpectedRun,
     ExpectedBye,
     EmptyBaseFolder,
+    BaseAlreadySet,
+    BaseNotSet,
     UnknownId,
 };
 
@@ -19,12 +21,14 @@ pub const Session = struct {
     log: *const rubr.log.Log,
     stream: std.net.Stream,
     tr: TreeReader,
+    base: ?std.fs.Dir = null,
 
     pub fn init(a: std.mem.Allocator, log: *const rubr.log.Log, stream: std.net.Stream) Self {
         return Self{ .a = a, .log = log, .stream = stream, .tr = TreeReader{ .in = stream } };
     }
     pub fn deinit(self: *Self) void {
-        _ = self;
+        if (self.base) |*base|
+            base.close();
     }
 
     pub fn run(self: *Self) !void {
@@ -61,6 +65,8 @@ pub const Session = struct {
                     if (!try self.tr.readComposite(&msg, T.Id, a))
                         return Error.ExpectedRun;
                     try self.printMessage(msg);
+
+                    try self.doRun(msg);
                 },
                 prot.Bye.Id => {
                     const T = prot.Bye;
@@ -91,8 +97,12 @@ pub const Session = struct {
 
         if (self.log.level(1)) |w|
             try w.print("Creating base {s}\n", .{replicate.base});
-        var base = try std.fs.cwd().makeOpenPath(replicate.base, .{});
-        defer base.close();
+        const base = try std.fs.cwd().makeOpenPath(replicate.base, .{});
+
+        // Store base dir for prot.Run
+        if (self.base != null)
+            return Error.BaseAlreadySet;
+        self.base = base;
 
         for (replicate.files.items) |file| {
             if (file.content) |content| {
@@ -109,6 +119,51 @@ pub const Session = struct {
                 }
             }
         }
+    }
+
+    fn doRun(self: *Self, r: prot.Run) !void {
+        const base = self.base orelse return Error.BaseNotSet;
+
+        var argv = std.ArrayList([]const u8).init(self.a);
+        defer argv.deinit();
+
+        try argv.append(r.cmd);
+        for (r.args.items) |arg| {
+            try argv.append(arg);
+        }
+
+        var proc = std.process.Child.init(argv.items, self.a);
+
+        // &todo: This might not work for Windows yet: https://github.com/ziglang/zig/issues/5190
+        proc.cwd_dir = base;
+
+        proc.stdout_behavior = .Pipe;
+        proc.stderr_behavior = .Ignore;
+
+        try proc.spawn();
+
+        const stdout = proc.stdout.?;
+        var reader = stdout.reader();
+
+        const file = try std.fs.cwd().createFile("output.txt", .{});
+        defer file.close();
+
+        var writer = file.writer();
+
+        var buf: [1024]u8 = undefined;
+        while (true) {
+            const n = try reader.read(&buf);
+            if (n == 0)
+                // End of file
+                break;
+
+            // &todo: Provide output to Client
+            const output = buf[0..n];
+            try writer.print("output: {s}\n", .{output});
+        }
+
+        // &todo: Provide exit code to Client
+        _ = try proc.wait();
     }
 
     fn printMessage(self: Self, msg: anytype) !void {
