@@ -4,15 +4,13 @@ const rubr = @import("rubr.zig");
 const tree = @import("tree.zig");
 const prot = @import("prot.zig");
 const crypto = @import("crypto.zig");
+const srvr = @import("srvr.zig");
+const clnt = @import("clnt.zig");
 
 pub const Error = error{
     ExpectedIp,
     ExpectedPort,
-    ExpectedHello,
     ExpectedReplicate,
-    ExpectedRun,
-    ExpectedBye,
-    UnknownId,
     NotImplemented,
 };
 
@@ -80,13 +78,6 @@ pub const App = struct {
         }
     }
 
-    fn printMessage(self: Self, msg: anytype) !void {
-        if (self.log.level(1)) |w| {
-            try w.print("\nReceived message:\n", .{});
-            var root = rubr.naft.Node.init(w);
-            msg.write(&root);
-        }
-    }
     fn runServer(self: *Self) !void {
         const addr = try self.address();
         if (self.log.level(1)) |w|
@@ -103,57 +94,10 @@ pub const App = struct {
             if (self.log.level(1)) |w|
                 try w.print("Received connection {}\n", .{connection.address});
 
-            var tr = rubr.comm.TreeReader(std.net.Stream){ .in = connection.stream };
+            var session = srvr.Session.init(self.a, self.log, connection.stream);
+            defer session.deinit();
 
-            var quit = false;
-            while (!quit) {
-                var aa = std.heap.ArenaAllocator.init(self.a);
-                defer aa.deinit();
-
-                const a = aa.allocator();
-
-                const header = try tr.readHeader();
-                switch (header.id) {
-                    prot.Hello.Id => {
-                        const T = prot.Hello;
-                        var msg: T = undefined;
-                        if (!try tr.readComposite(&msg, T.Id, {}))
-                            return Error.ExpectedHello;
-                        try self.printMessage(msg);
-                    },
-                    prot.Replicate.Id => {
-                        const T = prot.Replicate;
-                        var msg = T.init(a);
-                        defer msg.deinit();
-                        if (!try tr.readComposite(&msg, T.Id, a))
-                            return Error.ExpectedReplicate;
-                        try self.printMessage(msg);
-                    },
-                    prot.Run.Id => {
-                        const T = prot.Run;
-                        var msg = T.init(a);
-                        defer msg.deinit();
-                        if (!try tr.readComposite(&msg, T.Id, a))
-                            return Error.ExpectedRun;
-                        try self.printMessage(msg);
-                    },
-                    prot.Bye.Id => {
-                        const T = prot.Bye;
-                        var msg: T = undefined;
-                        if (!try tr.readComposite(&msg, T.Id, {}))
-                            return Error.ExpectedBye;
-                        try self.printMessage(msg);
-
-                        if (self.log.level(1)) |w|
-                            try w.print("Closing connection\n", .{});
-                        quit = true;
-                    },
-                    else => {
-                        try self.log.err("Unknown Id {}\n", .{header.id});
-                        return Error.UnknownId;
-                    },
-                }
-            }
+            try session.run();
         }
     }
     fn runClient(self: *Self) !void {
@@ -163,37 +107,10 @@ pub const App = struct {
         var stream = try std.net.tcpConnectToAddress(addr);
         defer stream.close();
 
-        const tw = rubr.comm.TreeWriter(std.net.Stream){ .out = stream };
+        var session = clnt.Session.init(self.a, stream);
+        defer session.deinit();
 
-        {
-            const T = prot.Hello;
-            try tw.writeComposite(T{ .role = T.Role.Client, .status = T.Status.Pending }, T.Id);
-        }
-
-        {
-            const T = prot.Replicate;
-            var msg = T.init(self.a);
-            defer msg.deinit();
-            msg.base = try msg.a.dupe(u8, "tmp");
-            msg.files = try tree.collectFileStates(std.fs.cwd(), self.a);
-
-            try tw.writeComposite(msg, T.Id);
-        }
-
-        {
-            const T = prot.Run;
-            var msg = T.init(self.a);
-            defer msg.deinit();
-            msg.cmd = try msg.a.dupe(u8, "rake");
-            try msg.args.append(try msg.a.dupe(u8, "ut"));
-
-            try tw.writeComposite(msg, T.Id);
-        }
-
-        {
-            const T = prot.Bye;
-            try tw.writeComposite(T{}, T.Id);
-        }
+        try session.run();
     }
 
     fn address(self: Self) !std.net.Address {

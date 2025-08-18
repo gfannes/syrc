@@ -3,7 +3,7 @@ const crypto = @import("crypto.zig");
 const rubr = @import("rubr.zig");
 
 pub const Error = error{
-    ExpectedString,
+    ExpectedName,
     ExpectedContent,
     ExpectedChecksum,
     ExpectedFlags,
@@ -16,7 +16,8 @@ pub const FileState = struct {
     const Self = @This();
 
     a: std.mem.Allocator,
-    path: []const u8 = &.{},
+    path: ?[]const u8 = null,
+    name: []const u8 = &.{},
     content: ?[]const u8 = null,
     checksum: ?crypto.Checksum = null,
     attributes: Attributes = .{},
@@ -26,13 +27,17 @@ pub const FileState = struct {
         return Self{ .a = a };
     }
     pub fn deinit(self: *Self) void {
-        self.a.free(self.path);
+        if (self.path) |path|
+            self.a.free(path);
+        self.a.free(self.name);
         if (self.content) |data|
             self.a.free(data);
     }
 
     pub fn writeComposite(self: Self, tw: anytype) !void {
-        try tw.writeLeaf(self.path, 3);
+        if (self.path) |path|
+            try tw.writeLeaf(path, 3);
+        try tw.writeLeaf(self.name, 5);
 
         {
             var flags: u3 = 0;
@@ -42,39 +47,43 @@ pub const FileState = struct {
             flags += if (self.attributes.write) 1 else 0;
             flags <<= 1;
             flags += if (self.attributes.execute) 1 else 0;
-            try tw.writeLeaf(flags, 3);
+            try tw.writeLeaf(flags, 7);
         }
 
-        try tw.writeLeaf(self.timestamp, 3);
+        try tw.writeLeaf(self.timestamp, 9);
 
         if (self.content) |content|
-            try tw.writeLeaf(content, 5);
+            try tw.writeLeaf(content, 11);
 
         if (self.checksum) |cs|
-            try tw.writeLeaf(&cs, 7);
+            try tw.writeLeaf(&cs, 13);
     }
     pub fn readComposite(self: *Self, tr: anytype, a: std.mem.Allocator) !void {
-        if (!try tr.readLeaf(&self.path, 3, a))
-            return Error.ExpectedString;
+        self.path = undefined;
+        if (!try tr.readLeaf(&self.path.?, 3, a))
+            self.path = null;
+
+        if (!try tr.readLeaf(&self.name, 5, a))
+            return Error.ExpectedName;
 
         var flags: u3 = undefined;
-        if (!try tr.readLeaf(&flags, 3, {}))
+        if (!try tr.readLeaf(&flags, 7, {}))
             return Error.ExpectedFlags;
 
-        if (!try tr.readLeaf(&self.timestamp, 3, {}))
+        if (!try tr.readLeaf(&self.timestamp, 9, {}))
             return Error.ExpectedTimestamp;
 
         while (true) {
             const header = try tr.readHeader();
             switch (header.id) {
-                5 => {
+                11 => {
                     self.content = undefined;
                     if (!try tr.readLeaf(&self.content.?, header.id, a))
                         return Error.ExpectedContent;
                 },
-                7 => {
+                13 => {
                     var checksum: []const u8 = undefined;
-                    if (!try tr.readLeaf(&checksum, 7, a))
+                    if (!try tr.readLeaf(&checksum, header.id, a))
                         return Error.ExpectedChecksum;
                     if (checksum.len != @sizeOf(crypto.Checksum))
                         return Error.WrongChecksumSize;
@@ -90,9 +99,11 @@ pub const FileState = struct {
     pub fn write(self: Self, parent: *rubr.naft.Node) void {
         var node = parent.node("tree.FileState");
         defer node.deinit();
-        node.attr("path", self.path);
+        if (self.path) |path|
+            node.attr("path", path);
+        node.attr("name", self.name);
         if (self.content) |content|
-            node.attr("content", content);
+            node.attr("content", content.len);
         if (self.checksum) |checksum| {
             var buffer: [2 * 20]u8 = undefined;
             for (checksum, 0..) |byte, ix0| {
@@ -153,7 +164,9 @@ pub fn collectFileStates(dir: std.fs.Dir, a: std.mem.Allocator) !FileStates {
                 const r = file.reader();
 
                 var file_state = FileState.init(my.a);
-                file_state.path = try my.a.dupe(u8, path[offsets.base..]);
+                if (offsets.name != offsets.base)
+                    file_state.path = try my.a.dupe(u8, path[offsets.base .. offsets.name - 1]);
+                file_state.name = try my.a.dupe(u8, path[offsets.name..]);
                 const content = try r.readAllAlloc(my.a, my_size);
                 file_state.content = content;
                 file_state.checksum = crypto.checksum(content);

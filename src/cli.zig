@@ -15,6 +15,7 @@ pub const Error = error{
 
 const Default = struct {
     const port: u16 = 1357;
+    const ip: []const u8 = "0.0.0.0";
 };
 
 pub const Mode = enum { Client, Server, Broker, Test };
@@ -29,7 +30,7 @@ pub const Args = struct {
     verbose: usize = 1,
     src: ?[]const u8 = null,
     dst: ?[]const u8 = null,
-    ip: ?[]const u8 = null,
+    ip: []const u8 = Default.ip,
     port: u16 = Default.port,
     mode: Mode = Mode.Test,
     j: usize,
@@ -87,7 +88,7 @@ pub const Args = struct {
         std.debug.print("    -j/--jobs     NUMBER    Number of threads to use [optional, default is {}]\n", .{self.j});
         std.debug.print("    -s/--src      FOLDER    Source folder to synchronize\n", .{});
         std.debug.print("    -d/--dst      DEST      Remote destination\n", .{});
-        std.debug.print("    -a/--ip       ADDRESS   Ip address\n", .{});
+        std.debug.print("    -a/--ip       ADDRESS   Ip address [optional, default is {s}]\n", .{Default.ip});
         std.debug.print("    -p/--port     PORT      Port to use [optional, default is {}]\n", .{Default.port});
         std.debug.print("    -m/--mode     MODE      Operation mode: 'client', 'server', 'broker' and 'test'\n", .{});
         std.debug.print("Developed by Geert Fannes.\n", .{});
