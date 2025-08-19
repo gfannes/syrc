@@ -58,12 +58,12 @@ pub const FileState = struct {
         if (self.checksum) |cs|
             try tw.writeLeaf(&cs, 13);
     }
-    pub fn readComposite(self: *Self, tr: anytype, a: std.mem.Allocator) !void {
+    pub fn readComposite(self: *Self, tr: anytype) !void {
         self.path = undefined;
-        if (!try tr.readLeaf(&self.path.?, 3, a))
+        if (!try tr.readLeaf(&self.path.?, 3, self.a))
             self.path = null;
 
-        if (!try tr.readLeaf(&self.name, 5, a))
+        if (!try tr.readLeaf(&self.name, 5, self.a))
             return Error.ExpectedName;
 
         var flags: u3 = undefined;
@@ -78,12 +78,12 @@ pub const FileState = struct {
             switch (header.id) {
                 11 => {
                     self.content = undefined;
-                    if (!try tr.readLeaf(&self.content.?, header.id, a))
+                    if (!try tr.readLeaf(&self.content.?, header.id, self.a))
                         return Error.ExpectedContent;
                 },
                 13 => {
                     var checksum: []const u8 = undefined;
-                    if (!try tr.readLeaf(&checksum, header.id, a))
+                    if (!try tr.readLeaf(&checksum, header.id, self.a))
                         return Error.ExpectedChecksum;
                     if (checksum.len != @sizeOf(crypto.Checksum))
                         return Error.WrongChecksumSize;

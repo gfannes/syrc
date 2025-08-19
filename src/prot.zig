@@ -12,6 +12,11 @@ pub const Error = error{
     ExpectedCmd,
     ExpectedArg,
     UnexpectedData,
+    ReasonAlreadySet,
+};
+
+pub const My = struct {
+    pub const version = 0;
 };
 
 pub const Hello = struct {
@@ -20,7 +25,7 @@ pub const Hello = struct {
     pub const Role = enum { Client, Server, Broker };
     pub const Status = enum { Ok, Pending, Fail };
 
-    version: u32 = 0,
+    version: u32 = My.version,
     role: Role,
     status: Status,
 
@@ -36,7 +41,7 @@ pub const Hello = struct {
         try tw.writeLeaf(@intFromEnum(self.role), 3);
         try tw.writeLeaf(@intFromEnum(self.status), 3);
     }
-    pub fn readComposite(self: *Self, tr: anytype, _: void) !void {
+    pub fn readComposite(self: *Self, tr: anytype) !void {
         if (!try tr.readLeaf(&self.version, 3, {}))
             return Error.ExpectedVersion;
 
@@ -85,19 +90,19 @@ pub const Replicate = struct {
             try tw.writeComposite(file, 2);
         }
     }
-    pub fn readComposite(self: *Self, tr: anytype, a: std.mem.Allocator) !void {
-        if (!try tr.readLeaf(&self.base, 3, a))
+    pub fn readComposite(self: *Self, tr: anytype) !void {
+        if (!try tr.readLeaf(&self.base, 3, self.a))
             return Error.ExpectedString;
 
         var size: usize = undefined;
         if (!try tr.readLeaf(&size, 3, {}))
             return Error.ExpectedSize;
 
-        var files = tree.FileStates.init(a);
+        var files = tree.FileStates.init(self.a);
         try files.resize(size);
         for (files.items) |*file| {
-            file.* = tree.FileState.init(a);
-            if (!try tr.readComposite(file, 2, a))
+            file.* = tree.FileState.init(self.a);
+            if (!try tr.readComposite(file, 2))
                 return Error.ExpectedFileState;
         }
         self.files = files;
@@ -128,10 +133,9 @@ pub const Missing = struct {
         _ = self;
         _ = tw;
     }
-    pub fn readComposite(self: *Self, tr: anytype, a: std.mem.Allocator) !void {
+    pub fn readComposite(self: *Self, tr: anytype) !void {
         _ = self;
         _ = tr;
-        _ = a;
     }
 };
 
@@ -156,10 +160,9 @@ pub const Content = struct {
         _ = self;
         _ = tw;
     }
-    pub fn readComposite(self: *Self, tr: anytype, a: std.mem.Allocator) !void {
+    pub fn readComposite(self: *Self, tr: anytype) !void {
         _ = self;
         _ = tr;
-        _ = a;
     }
 };
 
@@ -184,10 +187,9 @@ pub const Ready = struct {
         _ = self;
         _ = tw;
     }
-    pub fn readComposite(self: *Self, tr: anytype, a: std.mem.Allocator) !void {
+    pub fn readComposite(self: *Self, tr: anytype) !void {
         _ = self;
         _ = tr;
-        _ = a;
     }
 };
 
@@ -224,8 +226,8 @@ pub const Run = struct {
         for (self.args.items) |arg|
             try tw.writeLeaf(arg, 7);
     }
-    pub fn readComposite(self: *Self, tr: anytype, a: std.mem.Allocator) !void {
-        if (!try tr.readLeaf(&self.cmd, 3, a))
+    pub fn readComposite(self: *Self, tr: anytype) !void {
+        if (!try tr.readLeaf(&self.cmd, 3, self.a))
             return Error.ExpectedCmd;
 
         var size: usize = undefined;
@@ -234,7 +236,7 @@ pub const Run = struct {
 
         try self.args.resize(size);
         for (self.args.items) |*arg| {
-            if (!try tr.readLeaf(arg, 7, a))
+            if (!try tr.readLeaf(arg, 7, self.a))
                 return Error.ExpectedArg;
         }
     }
@@ -261,10 +263,9 @@ pub const Output = struct {
         _ = self;
         _ = tw;
     }
-    pub fn readComposite(self: *Self, tr: anytype, a: std.mem.Allocator) !void {
+    pub fn readComposite(self: *Self, tr: anytype) !void {
         _ = self;
         _ = tr;
-        _ = a;
     }
 };
 
@@ -289,10 +290,9 @@ pub const Done = struct {
         _ = self;
         _ = tw;
     }
-    pub fn readComposite(self: *Self, tr: anytype, a: std.mem.Allocator) !void {
+    pub fn readComposite(self: *Self, tr: anytype) !void {
         _ = self;
         _ = tr;
-        _ = a;
     }
 };
 
@@ -300,46 +300,45 @@ pub const Bye = struct {
     const Self = @This();
     pub const Id = 18;
 
-    pub fn write(self: Self, parent: *rubr.naft.Node) void {
-        _ = self;
-        var node = parent.node("prot.Bye");
-        defer node.deinit();
-    }
+    a: std.mem.Allocator,
+    reason: ?[]const u8 = null,
 
-    pub fn writeComposite(self: Self, tw: anytype) !void {
-        _ = self;
-        _ = tw;
-    }
-    pub fn readComposite(self: *Self, tr: anytype, _: void) !void {
-        _ = self;
-        _ = tr;
-    }
-};
-
-pub const X = struct {
-    const Self = @This();
-    pub const Id = 20;
-
-    pub fn init() Self {
-        return Self{};
+    pub fn init(a: std.mem.Allocator) Self {
+        return Self{ .a = a };
     }
     pub fn deinit(self: *Self) void {
-        _ = self;
+        if (self.reason) |reason|
+            self.a.free(reason);
+    }
+
+    pub fn setReason(self: *Self, comptime fmt: []const u8, args: anytype) !void {
+        if (self.reason != null)
+            return Error.ReasonAlreadySet;
+        self.reason = try std.fmt.allocPrint(self.a, fmt, args);
     }
 
     pub fn write(self: Self, parent: *rubr.naft.Node) void {
-        _ = self;
-        var node = parent.node("prot.X");
+        var node = parent.node("prot.Bye");
         defer node.deinit();
+        if (self.reason) |reason|
+            node.attr("reason", reason);
     }
 
     pub fn writeComposite(self: Self, tw: anytype) !void {
-        _ = self;
-        _ = tw;
+        if (self.reason) |reason|
+            try tw.writeLeaf(reason, 3);
     }
-    pub fn readComposite(self: *Self, tr: anytype, a: std.mem.Allocator) !void {
-        _ = self;
-        _ = tr;
-        _ = a;
+    pub fn readComposite(self: *Self, tr: anytype) !void {
+        self.reason = undefined;
+        if (!try tr.readLeaf(&self.reason.?, 3, self.a))
+            self.reason = null;
     }
 };
+
+pub fn printMessage(obj: anytype, log: *const rubr.log.Log) void {
+    if (log.level(1)) |w| {
+        var node = rubr.naft.Node.init(w);
+        defer node.deinit();
+        obj.write(&node);
+    }
+}

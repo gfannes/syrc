@@ -1,4 +1,4 @@
-// Output from `rake export[walker,cli,log,profile,naft,util,comm]` from https://github.com/gfannes/rubr from 2025-08-17
+// Output from `rake export[walker,cli,log,profile,naft,util,comm]` from https://github.com/gfannes/rubr from 2025-08-19
 
 const std = @import("std");
 
@@ -1138,7 +1138,7 @@ pub const comm = struct {
             }
     
             // Returns false if there is a Id mismatch
-            pub fn readComposite(self: *Self, obj: anytype, id: Id, ctx: anytype) !bool {
+            pub fn readComposite(self: *Self, obj: anytype, id: Id) !bool {
                 {
                     const header = try self.readHeader();
     
@@ -1153,7 +1153,7 @@ pub const comm = struct {
                     self.header = null;
                 }
     
-                try obj.readComposite(self, ctx);
+                try obj.readComposite(self);
     
                 {
                     const header = try self.readHeader();

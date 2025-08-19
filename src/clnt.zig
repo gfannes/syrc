@@ -1,25 +1,40 @@
 const std = @import("std");
-const rubr = @import("rubr.zig");
 const prot = @import("prot.zig");
+const comm = @import("comm.zig");
 const tree = @import("tree.zig");
+const rubr = @import("rubr.zig");
+
+pub const Error = error{
+    ExpectedHello,
+    ExpectedReplicate,
+    ExpectedRun,
+    ExpectedBye,
+    ExpectedStatusOk,
+    EmptyBaseFolder,
+    BaseAlreadySet,
+    BaseNotSet,
+    UnknownId,
+    PeerGaveUp,
+};
 
 pub const Session = struct {
     const Self = @This();
-    const TreeWriter = rubr.comm.TreeWriter(std.net.Stream);
 
     a: std.mem.Allocator,
+    log: *const rubr.log.Log,
     stream: std.net.Stream,
     base: []const u8,
     maybe_cmd: ?[]const u8 = null,
     args: []const []const u8 = &.{},
-    tw: TreeWriter,
+    io: comm.Io,
 
-    pub fn init(a: std.mem.Allocator, stream: std.net.Stream, base: []const u8) Self {
+    pub fn init(a: std.mem.Allocator, log: *const rubr.log.Log, stream: std.net.Stream, base: []const u8) Self {
         return Self{
             .a = a,
+            .log = log,
             .stream = stream,
             .base = base,
-            .tw = TreeWriter{ .out = stream },
+            .io = comm.Io.init(stream),
         };
     }
     pub fn deinit(self: *Self) void {
@@ -33,36 +48,46 @@ pub const Session = struct {
         self.args = argv[1..];
     }
 
-    pub fn run(self: *Self) !void {
+    pub fn execute(self: *Self) !void {
+        var bye = prot.Bye.init(self.a);
+        defer bye.deinit();
+
+        try self.io.send(prot.Hello{ .role = .Client, .status = .Pending });
+
         {
-            const T = prot.Hello;
-            try self.tw.writeComposite(T{ .role = T.Role.Client, .status = T.Status.Pending }, T.Id);
+            var hello: prot.Hello = undefined;
+            if (try self.io.receive2(&hello, &bye)) {
+                prot.printMessage(hello, self.log);
+                if (hello.status != .Ok) {
+                    try bye.setReason("Expected status Ok, not {}", .{hello.status});
+                    try self.io.send(bye);
+                    return Error.ExpectedStatusOk;
+                }
+            } else {
+                prot.printMessage(bye, self.log);
+                return Error.PeerGaveUp;
+            }
         }
 
         {
-            const T = prot.Replicate;
-            var msg = T.init(self.a);
-            defer msg.deinit();
-            msg.base = try msg.a.dupe(u8, self.base);
-            msg.files = try tree.collectFileStates(std.fs.cwd(), self.a);
+            var replicate = prot.Replicate.init(self.a);
+            defer replicate.deinit();
+            replicate.base = try replicate.a.dupe(u8, self.base);
+            replicate.files = try tree.collectFileStates(std.fs.cwd(), self.a);
 
-            try self.tw.writeComposite(msg, T.Id);
+            try self.io.send(replicate);
         }
 
         if (self.maybe_cmd) |cmd| {
-            const T = prot.Run;
-            var msg = T.init(self.a);
-            defer msg.deinit();
-            msg.cmd = try msg.a.dupe(u8, cmd);
+            var run = prot.Run.init(self.a);
+            defer run.deinit();
+            run.cmd = try run.a.dupe(u8, cmd);
             for (self.args) |arg|
-                try msg.args.append(try msg.a.dupe(u8, arg));
+                try run.args.append(try run.a.dupe(u8, arg));
 
-            try self.tw.writeComposite(msg, T.Id);
+            try self.io.send(run);
         }
 
-        {
-            const T = prot.Bye;
-            try self.tw.writeComposite(T{}, T.Id);
-        }
+        try self.io.send(bye);
     }
 };

@@ -1,5 +1,6 @@
 const std = @import("std");
 const prot = @import("prot.zig");
+const comm = @import("comm.zig");
 const rubr = @import("rubr.zig");
 
 pub const Error = error{
@@ -11,16 +12,17 @@ pub const Error = error{
     BaseAlreadySet,
     BaseNotSet,
     UnknownId,
+    VersionMismatch,
+    PeerGaveUp,
 };
 
 pub const Session = struct {
     const Self = @This();
-    const TreeReader = rubr.comm.TreeReader(std.net.Stream);
 
     a: std.mem.Allocator,
     log: *const rubr.log.Log,
     stream: std.net.Stream,
-    tr: TreeReader,
+    io: comm.Io,
     base: ?std.fs.Dir = null,
 
     pub fn init(a: std.mem.Allocator, log: *const rubr.log.Log, stream: std.net.Stream) Self {
@@ -28,7 +30,7 @@ pub const Session = struct {
             .a = a,
             .log = log,
             .stream = stream,
-            .tr = TreeReader{ .in = stream },
+            .io = comm.Io.init(stream),
         };
     }
     pub fn deinit(self: *Self) void {
@@ -36,60 +38,56 @@ pub const Session = struct {
             base.close();
     }
 
-    pub fn run(self: *Self) !void {
-        var quit = false;
-        while (!quit) {
+    pub fn execute(self: *Self) !void {
+        var bye = prot.Bye.init(self.a);
+        defer bye.deinit();
+
+        // Handshake
+        {
+            var hello: prot.Hello = undefined;
+            if (try self.io.receive2(&hello, &bye)) {
+                prot.printMessage(hello, self.log);
+                if (hello.version != prot.My.version) {
+                    try bye.setReason("Version mismatch: mine {} !=  peer {}", .{ prot.My.version, hello.version });
+                    try self.io.send(bye);
+                    return Error.VersionMismatch;
+                }
+                try self.io.send(prot.Hello{ .role = .Client, .status = .Ok });
+            } else {
+                prot.printMessage(bye, self.log);
+                return Error.PeerGaveUp;
+            }
+        }
+
+        // Sync
+        {
             var aa = std.heap.ArenaAllocator.init(self.a);
             defer aa.deinit();
 
-            const a = aa.allocator();
+            var replicate = prot.Replicate.init(aa.allocator());
 
-            const header = try self.tr.readHeader();
-            switch (header.id) {
-                prot.Hello.Id => {
-                    const T = prot.Hello;
-                    var msg: T = undefined;
-                    if (!try self.tr.readComposite(&msg, T.Id, {}))
-                        return Error.ExpectedHello;
-                    try self.printMessage(msg);
-                },
-                prot.Replicate.Id => {
-                    const T = prot.Replicate;
-                    var msg = T.init(a);
-                    defer msg.deinit();
-                    if (!try self.tr.readComposite(&msg, T.Id, a))
-                        return Error.ExpectedReplicate;
-                    try self.printMessage(msg);
-
-                    try self.doReplicate(msg);
-                },
-                prot.Run.Id => {
-                    const T = prot.Run;
-                    var msg = T.init(a);
-                    defer msg.deinit();
-                    if (!try self.tr.readComposite(&msg, T.Id, a))
-                        return Error.ExpectedRun;
-                    try self.printMessage(msg);
-
-                    try self.doRun(msg);
-                },
-                prot.Bye.Id => {
-                    const T = prot.Bye;
-                    var msg: T = undefined;
-                    if (!try self.tr.readComposite(&msg, T.Id, {}))
-                        return Error.ExpectedBye;
-                    try self.printMessage(msg);
-
-                    if (self.log.level(1)) |w|
-                        try w.print("Closing connection\n", .{});
-                    quit = true;
-                },
-                else => {
-                    try self.log.err("Unknown Id {}\n", .{header.id});
-                    return Error.UnknownId;
-                },
+            if (try self.io.receive(&replicate)) {
+                prot.printMessage(replicate, self.log);
+                try self.doReplicate(replicate);
             }
         }
+
+        // Run
+        {
+            var aa = std.heap.ArenaAllocator.init(self.a);
+            defer aa.deinit();
+
+            var run = prot.Run.init(aa.allocator());
+
+            if (try self.io.receive(&run)) {
+                prot.printMessage(run, self.log);
+                try self.doRun(run);
+            }
+        }
+
+        // Hangup
+        if (try self.io.receive(&bye))
+            prot.printMessage(bye, self.log);
     }
 
     fn doReplicate(self: *Self, replicate: prot.Replicate) !void {
@@ -126,12 +124,12 @@ pub const Session = struct {
         }
     }
 
-    fn doRun(self: *Self, r: prot.Run) !void {
+    fn doRun(self: *Self, run: prot.Run) !void {
         var argv = std.ArrayList([]const u8).init(self.a);
         defer argv.deinit();
 
-        try argv.append(r.cmd);
-        for (r.args.items) |arg|
+        try argv.append(run.cmd);
+        for (run.args.items) |arg|
             try argv.append(arg);
 
         var proc = std.process.Child.init(argv.items, self.a);
@@ -172,13 +170,6 @@ pub const Session = struct {
                 // &todo: Provide output to Client
                 std.debug.print("output: {} {}=>({s})\n", .{ kind, n, buf[0..n] });
             }
-        }
-    }
-    fn printMessage(self: Self, msg: anytype) !void {
-        if (self.log.level(1)) |w| {
-            try w.print("\nReceived message:\n", .{});
-            var root = rubr.naft.Node.init(w);
-            msg.write(&root);
         }
     }
 };

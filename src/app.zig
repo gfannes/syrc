@@ -72,18 +72,21 @@ pub const App = struct {
 
             const tw = rubr.comm.TreeWriter(std.fs.File){ .out = file };
 
-            try tw.writeComposite(&replicate, 2);
+            try tw.writeComposite(&replicate, prot.Replicate.Id);
         }
+
         {
             const file = try std.fs.cwd().openFile("output.dat", .{});
             defer file.close();
 
             var tr = rubr.comm.TreeReader(std.fs.File){ .in = file };
 
-            var rep: prot.Replicate = undefined;
             var aa = std.heap.ArenaAllocator.init(self.a);
             defer aa.deinit();
-            if (!try tr.readComposite(&rep, 2, aa.allocator()))
+
+            var rep = prot.Replicate.init(aa.allocator());
+            defer rep.deinit();
+            if (!try tr.readComposite(&rep, prot.Replicate.Id))
                 return Error.ExpectedReplicate;
         }
     }
@@ -107,7 +110,7 @@ pub const App = struct {
             var session = srvr.Session.init(self.a, self.log, connection.stream);
             defer session.deinit();
 
-            try session.run();
+            try session.execute();
 
             // break;
         }
@@ -119,12 +122,12 @@ pub const App = struct {
         var stream = try std.net.tcpConnectToAddress(addr);
         defer stream.close();
 
-        var session = clnt.Session.init(self.a, stream, self.base);
+        var session = clnt.Session.init(self.a, self.log, stream, self.base);
         defer session.deinit();
 
         session.setArgv(self.extra);
 
-        try session.run();
+        try session.execute();
     }
 
     fn address(self: Self) !std.net.Address {
