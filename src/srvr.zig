@@ -122,19 +122,17 @@ pub const Session = struct {
     }
 
     fn doRun(self: *Self, r: prot.Run) !void {
-        const base = self.base orelse return Error.BaseNotSet;
-
         var argv = std.ArrayList([]const u8).init(self.a);
         defer argv.deinit();
 
         try argv.append(r.cmd);
-        for (r.args.items) |arg| {
+        for (r.args.items) |arg|
             try argv.append(arg);
-        }
 
         var proc = std.process.Child.init(argv.items, self.a);
 
         // &todo: This might not work for Windows yet: https://github.com/ziglang/zig/issues/5190
+        const base = self.base orelse return Error.BaseNotSet;
         proc.cwd_dir = base;
 
         proc.stdout_behavior = .Pipe;
@@ -142,28 +140,22 @@ pub const Session = struct {
 
         try proc.spawn();
 
-        const stdout = proc.stdout.?;
-        var reader = stdout.reader();
+        if (proc.stdout) |stdout| {
+            var buf: [1024]u8 = undefined;
+            while (true) {
+                const n = try stdout.readAll(&buf);
+                if (n == 0)
+                    // End of file
+                    break;
 
-        const file = try std.fs.cwd().createFile("output.txt", .{});
-        defer file.close();
-
-        var writer = file.writer();
-
-        var buf: [1024]u8 = undefined;
-        while (true) {
-            const n = try reader.read(&buf);
-            if (n == 0)
-                // End of file
-                break;
-
-            // &todo: Provide output to Client
-            const output = buf[0..n];
-            try writer.print("output: {s}\n", .{output});
+                // &todo: Provide output to Client
+                std.debug.print("output: {}=>({s})\n", .{ n, buf[0..n] });
+            }
         }
 
         // &todo: Provide exit code to Client
-        _ = try proc.wait();
+        const term = try proc.wait();
+        std.debug.print("term: {}\n", .{term});
     }
 
     fn printMessage(self: Self, msg: anytype) !void {

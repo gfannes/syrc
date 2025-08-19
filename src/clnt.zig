@@ -39,7 +39,7 @@ pub const Session = struct {
             var msg = T.init(self.a);
             defer msg.deinit();
             msg.cmd = try msg.a.dupe(u8, "rake");
-            try msg.args.append(try msg.a.dupe(u8, "ut"));
+            try msg.args.append(try msg.a.dupe(u8, "-T"));
 
             try self.tw.writeComposite(msg, T.Id);
         }

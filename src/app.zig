@@ -98,6 +98,8 @@ pub const App = struct {
             defer session.deinit();
 
             try session.run();
+
+            // break;
         }
     }
     fn runClient(self: *Self) !void {
