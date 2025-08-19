@@ -9,13 +9,28 @@ pub const Session = struct {
 
     a: std.mem.Allocator,
     stream: std.net.Stream,
+    base: []const u8,
+    maybe_cmd: ?[]const u8 = null,
+    args: []const []const u8 = &.{},
     tw: TreeWriter,
 
-    pub fn init(a: std.mem.Allocator, stream: std.net.Stream) Self {
-        return Self{ .a = a, .stream = stream, .tw = TreeWriter{ .out = stream } };
+    pub fn init(a: std.mem.Allocator, stream: std.net.Stream, base: []const u8) Self {
+        return Self{
+            .a = a,
+            .stream = stream,
+            .base = base,
+            .tw = TreeWriter{ .out = stream },
+        };
     }
     pub fn deinit(self: *Self) void {
         _ = self;
+    }
+
+    pub fn setArgv(self: *Self, argv: []const []const u8) void {
+        if (argv.len < 1)
+            return;
+        self.maybe_cmd = argv[0];
+        self.args = argv[1..];
     }
 
     pub fn run(self: *Self) !void {
@@ -28,18 +43,19 @@ pub const Session = struct {
             const T = prot.Replicate;
             var msg = T.init(self.a);
             defer msg.deinit();
-            msg.base = try msg.a.dupe(u8, "tmp");
+            msg.base = try msg.a.dupe(u8, self.base);
             msg.files = try tree.collectFileStates(std.fs.cwd(), self.a);
 
             try self.tw.writeComposite(msg, T.Id);
         }
 
-        {
+        if (self.maybe_cmd) |cmd| {
             const T = prot.Run;
             var msg = T.init(self.a);
             defer msg.deinit();
-            msg.cmd = try msg.a.dupe(u8, "rake");
-            try msg.args.append(try msg.a.dupe(u8, "-T"));
+            msg.cmd = try msg.a.dupe(u8, cmd);
+            for (self.args) |arg|
+                try msg.args.append(try msg.a.dupe(u8, arg));
 
             try self.tw.writeComposite(msg, T.Id);
         }

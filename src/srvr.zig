@@ -24,7 +24,12 @@ pub const Session = struct {
     base: ?std.fs.Dir = null,
 
     pub fn init(a: std.mem.Allocator, log: *const rubr.log.Log, stream: std.net.Stream) Self {
-        return Self{ .a = a, .log = log, .stream = stream, .tr = TreeReader{ .in = stream } };
+        return Self{
+            .a = a,
+            .log = log,
+            .stream = stream,
+            .tr = TreeReader{ .in = stream },
+        };
     }
     pub fn deinit(self: *Self) void {
         if (self.base) |*base|
@@ -136,21 +141,15 @@ pub const Session = struct {
         proc.cwd_dir = base;
 
         proc.stdout_behavior = .Pipe;
-        proc.stderr_behavior = .Ignore;
+        proc.stderr_behavior = .Pipe;
 
         try proc.spawn();
 
-        if (proc.stdout) |stdout| {
-            var buf: [1024]u8 = undefined;
-            while (true) {
-                const n = try stdout.readAll(&buf);
-                if (n == 0)
-                    // End of file
-                    break;
-
-                // &todo: Provide output to Client
-                std.debug.print("output: {}=>({s})\n", .{ n, buf[0..n] });
-            }
+        var maybe_stdout = proc.stdout;
+        var maybe_stderr = proc.stderr;
+        while (maybe_stdout != null or maybe_stderr != null) {
+            try processOutput(&maybe_stdout, .stdout);
+            try processOutput(&maybe_stderr, .stderr);
         }
 
         // &todo: Provide exit code to Client
@@ -158,6 +157,23 @@ pub const Session = struct {
         std.debug.print("term: {}\n", .{term});
     }
 
+    const OutputKind = enum { stdout, stderr };
+    fn processOutput(maybe_output: *?std.fs.File, kind: OutputKind) !void {
+        var buf: [1024]u8 = undefined;
+        if (maybe_output.*) |output| {
+            while (true) {
+                const n = try output.readAll(&buf);
+                if (n == 0) {
+                    // End of file
+                    maybe_output.* = null;
+                    break;
+                }
+
+                // &todo: Provide output to Client
+                std.debug.print("output: {} {}=>({s})\n", .{ kind, n, buf[0..n] });
+            }
+        }
+    }
     fn printMessage(self: Self, msg: anytype) !void {
         if (self.log.level(1)) |w| {
             try w.print("\nReceived message:\n", .{});

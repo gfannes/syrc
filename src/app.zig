@@ -23,9 +23,19 @@ pub const App = struct {
     ip: ?[]const u8 = null,
     port: ?u16 = null,
     server: ?std.net.Server = null,
+    base: []const u8,
+    extra: []const []const u8,
 
-    pub fn init(a: std.mem.Allocator, log: *const rubr.log.Log, mode: cli.Mode, ip: ?[]const u8, port: ?u16) Self {
-        return Self{ .a = a, .log = log, .mode = mode, .ip = ip, .port = port };
+    pub fn init(a: std.mem.Allocator, log: *const rubr.log.Log, mode: cli.Mode, ip: ?[]const u8, port: ?u16, base: []const u8, extra: []const []const u8) Self {
+        return Self{
+            .a = a,
+            .log = log,
+            .mode = mode,
+            .ip = ip,
+            .port = port,
+            .base = base,
+            .extra = extra,
+        };
     }
     pub fn deinit(self: *Self) void {
         if (self.server) |*server|
@@ -109,8 +119,10 @@ pub const App = struct {
         var stream = try std.net.tcpConnectToAddress(addr);
         defer stream.close();
 
-        var session = clnt.Session.init(self.a, stream);
+        var session = clnt.Session.init(self.a, stream, self.base);
         defer session.deinit();
+
+        session.setArgv(self.extra);
 
         try session.run();
     }
