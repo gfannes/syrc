@@ -21,17 +21,11 @@ pub const Session = struct {
 
     a: std.mem.Allocator,
     log: *const rubr.log.Log,
-    stream: std.net.Stream,
-    io: comm.Io,
+    io: comm.Io = undefined,
     base: ?std.fs.Dir = null,
 
-    pub fn init(a: std.mem.Allocator, log: *const rubr.log.Log, stream: std.net.Stream) Self {
-        return Self{
-            .a = a,
-            .log = log,
-            .stream = stream,
-            .io = comm.Io.init(stream),
-        };
+    pub fn init(self: *Self, stream: std.net.Stream) void {
+        self.io.init(stream);
     }
     pub fn deinit(self: *Self) void {
         if (self.base) |*base|
@@ -125,12 +119,12 @@ pub const Session = struct {
     }
 
     fn doRun(self: *Self, run: prot.Run) !void {
-        var argv = std.ArrayList([]const u8).init(self.a);
-        defer argv.deinit();
+        var argv = std.ArrayList([]const u8){};
+        defer argv.deinit(self.a);
 
-        try argv.append(run.cmd);
+        try argv.append(self.a, run.cmd);
         for (run.args.items) |arg|
-            try argv.append(arg);
+            try argv.append(self.a, arg);
 
         var proc = std.process.Child.init(argv.items, self.a);
 

@@ -22,20 +22,14 @@ pub const Session = struct {
 
     a: std.mem.Allocator,
     log: *const rubr.log.Log,
-    stream: std.net.Stream,
     base: []const u8,
+
     maybe_cmd: ?[]const u8 = null,
     args: []const []const u8 = &.{},
-    io: comm.Io,
+    io: comm.Io = undefined,
 
-    pub fn init(a: std.mem.Allocator, log: *const rubr.log.Log, stream: std.net.Stream, base: []const u8) Self {
-        return Self{
-            .a = a,
-            .log = log,
-            .stream = stream,
-            .base = base,
-            .io = comm.Io.init(stream),
-        };
+    pub fn init(self: *Self, stream: std.net.Stream) void {
+        self.io.init(stream);
     }
     pub fn deinit(self: *Self) void {
         _ = self;
@@ -83,7 +77,7 @@ pub const Session = struct {
             defer run.deinit();
             run.cmd = try run.a.dupe(u8, cmd);
             for (self.args) |arg|
-                try run.args.append(try run.a.dupe(u8, arg));
+                try run.args.append(self.a, try run.a.dupe(u8, arg));
 
             try self.io.send(run);
         }

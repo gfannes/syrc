@@ -9,17 +9,23 @@ pub const Error = error{
 
 pub const Io = struct {
     const Self = @This();
-    const TreeReader = rubr.comm.TreeReader(std.net.Stream);
-    const TreeWriter = rubr.comm.TreeWriter(std.net.Stream);
+    const TreeReader = rubr.comm.TreeReader(*std.Io.Reader);
+    const TreeWriter = rubr.comm.TreeWriter(*std.Io.Writer);
 
-    tr: TreeReader,
-    tw: TreeWriter,
+    readbuf: [1024]u8 = undefined,
+    writebuf: [1024]u8 = undefined,
 
-    pub fn init(stream: std.net.Stream) Self {
-        return Self{
-            .tr = TreeReader{ .in = stream },
-            .tw = TreeWriter{ .out = stream },
-        };
+    reader: std.net.Stream.Reader = undefined,
+    writer: std.net.Stream.Writer = undefined,
+
+    tr: TreeReader = undefined,
+    tw: TreeWriter = undefined,
+
+    pub fn init(self: *Self, stream: std.net.Stream) void {
+        self.reader = stream.reader(&self.readbuf);
+        self.writer = stream.writer(&self.writebuf);
+        self.tr = TreeReader{ .in = self.reader.interface() };
+        self.tw = TreeWriter{ .out = &self.writer.interface };
     }
 
     pub fn send(self: Self, obj: anytype) !void {

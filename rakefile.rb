@@ -17,7 +17,7 @@ task :install do
     m = {safe: :safe, fast: :fast}[mode]
     mode_str = m ? "--release=#{m}" : ''
     sh('clear')
-    sh("zig build install #{mode_str} --prefix-exe-dir #{gubg_bin_dir}")
+    sh("zig build install #{mode_str} --prefix-exe-dir #{gubg_bin_dir} -freference-trace=10")
 end
 
 desc 'Run all UTs'

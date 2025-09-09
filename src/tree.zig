@@ -131,17 +131,17 @@ pub fn collectFileStates(dir: std.fs.Dir, a: std.mem.Allocator) !FileStates {
 
         a: std.mem.Allocator,
         dir: std.fs.Dir,
-        file_states: FileStates,
+        file_states: FileStates = .{},
         walker: rubr.walker.Walker,
         total_size: u64 = 0,
 
         fn init(dirr: std.fs.Dir, aa: std.mem.Allocator) My {
-            return My{ .dir = dirr, .a = aa, .file_states = FileStates.init(aa), .walker = rubr.walker.Walker.init(aa) };
+            return My{ .dir = dirr, .a = aa, .walker = rubr.walker.Walker.init(aa) };
         }
         fn deinit(my: *My) void {
             for (my.file_states.items) |*item|
                 item.deinit();
-            my.file_states.deinit();
+            my.file_states.deinit(my.a);
             my.walker.deinit();
         }
 
@@ -161,17 +161,19 @@ pub fn collectFileStates(dir: std.fs.Dir, a: std.mem.Allocator) !FileStates {
                 my.total_size += my_size;
                 std.debug.print("Path: {s}, my size: {}, total_size: {}\n", .{ path, my_size, my.total_size });
 
-                const r = file.reader();
+                var buffer: [1024]u8 = undefined;
+                var r = file.reader(&buffer);
 
                 var file_state = FileState.init(my.a);
                 if (offsets.name != offsets.base)
                     file_state.path = try my.a.dupe(u8, path[offsets.base .. offsets.name - 1]);
                 file_state.name = try my.a.dupe(u8, path[offsets.name..]);
-                const content = try r.readAllAlloc(my.a, my_size);
+                const content = try my.a.alloc(u8, my_size);
+                try r.interface.readSliceAll(content);
                 file_state.content = content;
                 file_state.checksum = crypto.checksum(content);
 
-                try my.file_states.append(file_state);
+                try my.file_states.append(my.a, file_state);
             }
         }
     };
@@ -181,7 +183,7 @@ pub fn collectFileStates(dir: std.fs.Dir, a: std.mem.Allocator) !FileStates {
 
     try collector.collect();
 
-    var res = FileStates.init(a);
+    var res = FileStates{};
     std.mem.swap(FileStates, &res, &collector.file_states);
 
     return res;

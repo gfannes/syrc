@@ -79,7 +79,10 @@ pub const App = struct {
             const file = try std.fs.cwd().openFile("output.dat", .{});
             defer file.close();
 
-            var tr = rubr.comm.TreeReader(std.fs.File){ .in = file };
+            var buffer: [1024]u8 = undefined;
+            var reader = file.reader(&buffer);
+
+            var tr = rubr.comm.TreeReader(*std.Io.Reader){ .in = &reader.interface };
 
             var aa = std.heap.ArenaAllocator.init(self.a);
             defer aa.deinit();
@@ -94,7 +97,7 @@ pub const App = struct {
     fn runServer(self: *Self) !void {
         const addr = try self.address();
         if (self.log.level(1)) |w|
-            try w.print("Creating server on {}\n", .{addr});
+            try w.print("Creating server on {f}\n", .{addr});
         var server = try addr.listen(.{});
         defer server.deinit();
 
@@ -105,9 +108,10 @@ pub const App = struct {
             var connection = try server.accept();
             defer connection.stream.close();
             if (self.log.level(1)) |w|
-                try w.print("Received connection {}\n", .{connection.address});
+                try w.print("Received connection {f}\n", .{connection.address});
 
-            var session = srvr.Session.init(self.a, self.log, connection.stream);
+            var session = srvr.Session{ .a = self.a, .log = self.log };
+            session.init(connection.stream);
             defer session.deinit();
 
             try session.execute();
@@ -118,11 +122,12 @@ pub const App = struct {
     fn runClient(self: *Self) !void {
         const addr = try self.address();
         if (self.log.level(1)) |w|
-            try w.print("Connecting to {}\n", .{addr});
+            try w.print("Connecting to {f}\n", .{addr});
         var stream = try std.net.tcpConnectToAddress(addr);
         defer stream.close();
 
-        var session = clnt.Session.init(self.a, self.log, stream, self.base);
+        var session = clnt.Session{ .a = self.a, .log = self.log, .base = self.base };
+        session.init(stream);
         defer session.deinit();
 
         session.setArgv(self.extra);

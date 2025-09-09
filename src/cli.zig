@@ -24,6 +24,7 @@ pub const Args = struct {
     const Self = @This();
     pub const Strings = std.ArrayList([]const u8);
 
+    a: std.mem.Allocator,
     args: rubr.cli.Args,
 
     exe_name: []const u8 = &.{},
@@ -36,14 +37,14 @@ pub const Args = struct {
     mode: Mode = Mode.Test,
     j: usize,
     base: []const u8 = Default.base,
-    extra: Strings,
+    extra: Strings = .{},
 
     pub fn init(a: std.mem.Allocator) Self {
-        return Self{ .args = rubr.cli.Args.init(a), .j = std.Thread.getCpuCount() catch 0, .extra = Strings.init(a) };
+        return Self{ .a = a, .args = rubr.cli.Args.init(a), .j = std.Thread.getCpuCount() catch 0 };
     }
     pub fn deinit(self: *Self) void {
         self.args.deinit();
-        self.extra.deinit();
+        self.extra.deinit(self.a);
     }
 
     pub fn parse(self: *Self) !void {
@@ -81,7 +82,7 @@ pub const Args = struct {
                 else
                     return Error.ModeFormatError;
             } else {
-                try self.extra.append(arg.arg);
+                try self.extra.append(self.a, arg.arg);
             }
         }
     }

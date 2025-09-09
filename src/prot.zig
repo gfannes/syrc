@@ -63,16 +63,16 @@ pub const Replicate = struct {
 
     a: std.mem.Allocator,
     base: []const u8 = &.{},
-    files: tree.FileStates,
+    files: tree.FileStates = .{},
 
     pub fn init(a: std.mem.Allocator) Self {
-        return Self{ .a = a, .files = tree.FileStates.init(a) };
+        return Self{ .a = a };
     }
     pub fn deinit(self: *Self) void {
         self.a.free(self.base);
         for (self.files.items) |*item|
             item.deinit();
-        self.files.deinit();
+        self.files.deinit(self.a);
     }
 
     pub fn write(self: Self, parent: *rubr.naft.Node) void {
@@ -98,8 +98,8 @@ pub const Replicate = struct {
         if (!try tr.readLeaf(&size, 3, {}))
             return Error.ExpectedSize;
 
-        var files = tree.FileStates.init(self.a);
-        try files.resize(size);
+        var files = tree.FileStates{};
+        try files.resize(self.a, size);
         for (files.items) |*file| {
             file.* = tree.FileState.init(self.a);
             if (!try tr.readComposite(file, 2))
@@ -200,16 +200,16 @@ pub const Run = struct {
 
     a: std.mem.Allocator,
     cmd: []const u8 = &.{},
-    args: Args,
+    args: Args = .{},
 
     pub fn init(a: std.mem.Allocator) Self {
-        return Self{ .a = a, .args = Args.init(a) };
+        return Self{ .a = a };
     }
     pub fn deinit(self: *Self) void {
         self.a.free(self.cmd);
         for (self.args.items) |arg|
             self.a.free(arg);
-        self.args.deinit();
+        self.args.deinit(self.a);
     }
 
     pub fn write(self: Self, parent: *rubr.naft.Node) void {
@@ -234,7 +234,7 @@ pub const Run = struct {
         if (!try tr.readLeaf(&size, 5, {}))
             return Error.ExpectedSize;
 
-        try self.args.resize(size);
+        try self.args.resize(self.a, size);
         for (self.args.items) |*arg| {
             if (!try tr.readLeaf(arg, 7, self.a))
                 return Error.ExpectedArg;
