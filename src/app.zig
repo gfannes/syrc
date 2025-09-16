@@ -56,7 +56,7 @@ pub const App = struct {
     fn runTest(self: *Self) !void {
         var replicate: prot.Replicate = .{
             .a = self.a,
-            .base = "tmp",
+            .base = try self.a.dupe(u8, "tmp"),
             .files = try tree.collectFileStates(std.fs.cwd(), self.a),
         };
         defer replicate.deinit();

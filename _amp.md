@@ -8,7 +8,7 @@
 		- [ ] Add additional files/folders with `.syrc` files, next to `.ignore` and `.gitignore`
 	- [ ] Add attribute info
 	- [/] Add checksum info
-		- SHA2 is secure enough, faster and shorter
+		- Blake3 at 128bit is secure enough, faster and shorter
 		- [*] Use a thread pool directly to queue the checksum tasks
 			- [*] Limit the queue size with a semaphore, by default to the CPU count
 		- Read files into buffers
