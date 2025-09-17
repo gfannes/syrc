@@ -2,6 +2,9 @@
 
 # Client
 - [x] Measure/print duration
+- [*] Rework comm to use `std.Io.Reader/Writer` iso generic
+	- Add `flush()` where necessary
+- Copy data from netstream to file
 - [ ] Create tree state
 	- [/] List all files
 		- [x] Basic walking of CWD in [[app.zig]]
