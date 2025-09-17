@@ -70,7 +70,10 @@ pub const App = struct {
             const file = try std.fs.cwd().createFile("output.dat", .{});
             defer file.close();
 
-            const tw = rubr.comm.TreeWriter(std.fs.File){ .out = file };
+            var buffer: [1024]u8 = undefined;
+            var writer = file.writer(&buffer);
+
+            const tw = rubr.comm.TreeWriter{ .out = &writer.interface };
 
             try tw.writeComposite(&replicate, prot.Replicate.Id);
         }
@@ -82,7 +85,7 @@ pub const App = struct {
             var buffer: [1024]u8 = undefined;
             var reader = file.reader(&buffer);
 
-            var tr = rubr.comm.TreeReader(*std.Io.Reader){ .in = &reader.interface };
+            var tr = rubr.comm.TreeReader{ .in = &reader.interface };
 
             var aa = std.heap.ArenaAllocator.init(self.a);
             defer aa.deinit();

@@ -9,8 +9,8 @@ pub const Error = error{
 
 pub const Io = struct {
     const Self = @This();
-    const TreeReader = rubr.comm.TreeReader(*std.Io.Reader);
-    const TreeWriter = rubr.comm.TreeWriter(*std.Io.Writer);
+    const TreeReader = rubr.comm.TreeReader;
+    const TreeWriter = rubr.comm.TreeWriter;
 
     readbuf: [1024]u8 = undefined,
     writebuf: [1024]u8 = undefined,
