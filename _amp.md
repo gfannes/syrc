@@ -5,10 +5,14 @@
 - [x] Rework comm to use `std.Io.Reader/Writer` iso generic
 	- Add `flush()` where necessary
 - Copy data from netstream to file
+- Create `copy` mode
+	- Create tree state and use this to duplicate the tree
+		- Optional export to file and import from file
+	- [ ] Add additional files/folders with `.syrc` files, next to `.ignore` and `.gitignore`
+	- [ ] Support running commands
 - [ ] Create tree state
 	- [/] List all files
 		- [x] Basic walking of CWD in [[app.zig]]
-		- [ ] Add additional files/folders with `.syrc` files, next to `.ignore` and `.gitignore`
 	- [ ] Add attribute info
 	- [/] Add checksum info
 		- Blake3 at 128bit is secure enough, faster and shorter

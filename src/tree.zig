@@ -105,7 +105,7 @@ pub const FileState = struct {
         if (self.content) |content|
             node.attr("content", content.len);
         if (self.checksum) |checksum| {
-            var buffer: [2 * 20]u8 = undefined;
+            var buffer: [2 * rubr.util.arrayLenOf(crypto.Checksum)]u8 = undefined;
             for (checksum, 0..) |byte, ix0| {
                 const ix = 2 * ix0;
                 _ = std.fmt.bufPrint(buffer[ix .. ix + 2], "{x:0>2}", .{byte}) catch unreachable;
@@ -146,7 +146,7 @@ pub fn collectFileStates(dir: std.fs.Dir, a: std.mem.Allocator) !FileStates {
         }
 
         fn collect(my: *My) !void {
-            try my.walker.walk(std.fs.cwd(), my);
+            try my.walker.walk(my.dir, my);
         }
 
         pub fn call(my: *My, dirr: std.fs.Dir, path: []const u8, maybe_offsets: ?rubr.walker.Offsets, kind: rubr.walker.Kind) !void {

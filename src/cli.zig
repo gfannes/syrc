@@ -18,7 +18,7 @@ const Default = struct {
     const base: []const u8 = "tmp";
 };
 
-pub const Mode = enum { Client, Server, Broker, Test };
+pub const Mode = enum { Client, Server, Copy, Broker, Test };
 
 pub const Args = struct {
     const Self = @This();
@@ -30,7 +30,8 @@ pub const Args = struct {
     exe_name: []const u8 = &.{},
     print_help: bool = false,
     verbose: usize = 1,
-    src: ?[]const u8 = null,
+    src: []const u8 = ".",
+    src_buf: [std.fs.max_path_bytes]u8 = undefined,
     dst: ?[]const u8 = null,
     ip: []const u8 = Default.ip,
     port: u16 = Default.port,
@@ -75,6 +76,8 @@ pub const Args = struct {
                     Mode.Client
                 else if (mode.is("srvr", "server"))
                     Mode.Server
+                else if (mode.is("test", "copy"))
+                    Mode.Copy
                 else if (mode.is("brkr", "broker"))
                     Mode.Broker
                 else if (mode.is("test", "test"))
@@ -84,6 +87,10 @@ pub const Args = struct {
             } else {
                 try self.extra.append(self.a, arg.arg);
             }
+        }
+
+        if (!std.fs.path.isAbsolute(self.src)) {
+            self.src = try std.fs.cwd().realpath(self.src, &self.src_buf);
         }
     }
 
@@ -97,7 +104,7 @@ pub const Args = struct {
         std.debug.print("    -b/--base     FOLDER    Base folder to use on remote site [optional, default is '{s}']\n", .{Default.base});
         std.debug.print("    -a/--ip       ADDRESS   Ip address [optional, default is {s}]\n", .{Default.ip});
         std.debug.print("    -p/--port     PORT      Port to use [optional, default is {}]\n", .{Default.port});
-        std.debug.print("    -m/--mode     MODE      Operation mode: 'client', 'server', 'broker' and 'test'\n", .{});
+        std.debug.print("    -m/--mode     MODE      Operation mode: 'client', 'server', 'copy', 'broker' and 'test'\n", .{});
         std.debug.print("Developed by Geert Fannes.\n", .{});
     }
 };

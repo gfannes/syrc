@@ -23,6 +23,7 @@ pub const Session = struct {
     a: std.mem.Allocator,
     log: *const rubr.log.Log,
     base: []const u8,
+    src_dir: std.fs.Dir,
 
     maybe_cmd: ?[]const u8 = null,
     args: []const []const u8 = &.{},
@@ -67,7 +68,7 @@ pub const Session = struct {
             var replicate = prot.Replicate.init(self.a);
             defer replicate.deinit();
             replicate.base = try replicate.a.dupe(u8, self.base);
-            replicate.files = try tree.collectFileStates(std.fs.cwd(), self.a);
+            replicate.files = try tree.collectFileStates(self.src_dir, self.a);
 
             try self.io.send(replicate);
         }

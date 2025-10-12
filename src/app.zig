@@ -11,6 +11,7 @@ pub const Error = error{
     ExpectedIp,
     ExpectedPort,
     ExpectedReplicate,
+    ExpectedSrc,
     NotImplemented,
 };
 
@@ -24,9 +25,10 @@ pub const App = struct {
     port: ?u16 = null,
     server: ?std.net.Server = null,
     base: []const u8,
+    src: ?[]const u8,
     extra: []const []const u8,
 
-    pub fn init(a: std.mem.Allocator, log: *const rubr.log.Log, mode: cli.Mode, ip: ?[]const u8, port: ?u16, base: []const u8, extra: []const []const u8) Self {
+    pub fn init(a: std.mem.Allocator, log: *const rubr.log.Log, mode: cli.Mode, ip: ?[]const u8, port: ?u16, base: []const u8, src: ?[]const u8, extra: []const []const u8) Self {
         return Self{
             .a = a,
             .log = log,
@@ -34,6 +36,7 @@ pub const App = struct {
             .ip = ip,
             .port = port,
             .base = base,
+            .src = src,
             .extra = extra,
         };
     }
@@ -46,18 +49,70 @@ pub const App = struct {
         try self.log.info("Running mode {any}\n", .{self.mode});
 
         switch (self.mode) {
-            cli.Mode.Server => try self.runServer(),
             cli.Mode.Client => try self.runClient(),
+            cli.Mode.Server => try self.runServer(),
+            cli.Mode.Copy => try self.runCopy(),
             cli.Mode.Test => try self.runTest(),
             cli.Mode.Broker => return Error.NotImplemented,
         }
     }
 
-    fn runTest(self: *Self) !void {
+    fn runCopy(self: *Self) !void {
+        std.debug.print("runCopy {?s}\n", .{self.src});
+        var src_dir = try std.fs.openDirAbsolute(self.src orelse return Error.ExpectedSrc, .{});
+        defer src_dir.close();
+
         var replicate: prot.Replicate = .{
             .a = self.a,
             .base = try self.a.dupe(u8, "tmp"),
-            .files = try tree.collectFileStates(std.fs.cwd(), self.a),
+            .files = try tree.collectFileStates(src_dir, self.a),
+        };
+        defer replicate.deinit();
+
+        if (self.log.level(1)) |w| {
+            var root = rubr.naft.Node.init(w);
+            replicate.write(&root);
+        }
+
+        {
+            const file = try std.fs.cwd().createFile("output.dat", .{});
+            defer file.close();
+
+            var buffer: [1024]u8 = undefined;
+            var writer = file.writer(&buffer);
+
+            const tw = rubr.comm.TreeWriter{ .out = &writer.interface };
+
+            try tw.writeComposite(&replicate, prot.Replicate.Id);
+        }
+
+        {
+            const file = try std.fs.cwd().openFile("output.dat", .{});
+            defer file.close();
+
+            var buffer: [1024]u8 = undefined;
+            var reader = file.reader(&buffer);
+
+            var tr = rubr.comm.TreeReader{ .in = &reader.interface };
+
+            var aa = std.heap.ArenaAllocator.init(self.a);
+            defer aa.deinit();
+
+            var rep = prot.Replicate.init(aa.allocator());
+            defer rep.deinit();
+            if (!try tr.readComposite(&rep, prot.Replicate.Id))
+                return Error.ExpectedReplicate;
+        }
+    }
+
+    fn runTest(self: *Self) !void {
+        var src_dir = try std.fs.openDirAbsolute(self.src orelse return Error.ExpectedSrc, .{});
+        defer src_dir.close();
+
+        var replicate: prot.Replicate = .{
+            .a = self.a,
+            .base = try self.a.dupe(u8, "tmp"),
+            .files = try tree.collectFileStates(src_dir, self.a),
         };
         defer replicate.deinit();
 
@@ -129,7 +184,15 @@ pub const App = struct {
         var stream = try std.net.tcpConnectToAddress(addr);
         defer stream.close();
 
-        var session = clnt.Session{ .a = self.a, .log = self.log, .base = self.base };
+        var src_dir = try std.fs.openDirAbsolute(self.src orelse return Error.ExpectedSrc, .{});
+        defer src_dir.close();
+
+        var session = clnt.Session{
+            .a = self.a,
+            .log = self.log,
+            .base = self.base,
+            .src_dir = src_dir,
+        };
         session.init(stream);
         defer session.deinit();
 
