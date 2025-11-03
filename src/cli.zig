@@ -76,7 +76,7 @@ pub const Args = struct {
                     Mode.Client
                 else if (mode.is("srvr", "server"))
                     Mode.Server
-                else if (mode.is("test", "copy"))
+                else if (mode.is("cp", "copy"))
                     Mode.Copy
                 else if (mode.is("brkr", "broker"))
                     Mode.Broker

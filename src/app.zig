@@ -121,35 +121,47 @@ pub const App = struct {
             replicate.write(&root);
         }
 
-        {
-            const file = try std.fs.cwd().createFile("output.dat", .{});
-            defer file.close();
+        const Cb = struct {
+            a: std.mem.Allocator,
+            replicate: *const prot.Replicate,
+            wb: [1024]u8 = undefined,
+            ib: [1024]u8 = undefined,
+            rb: [1024]u8 = undefined,
+            pipe: rubr.pipe.Pipe = undefined,
+            writer_thread: std.Thread = undefined,
+            reader_thread: std.Thread = undefined,
 
-            var buffer: [1024]u8 = undefined;
-            var writer = file.writer(&buffer);
+            fn init(cb: *@This()) !void {
+                cb.pipe = rubr.pipe.Pipe.init(&cb.wb, &cb.ib, &cb.rb);
+                cb.writer_thread = try std.Thread.spawn(.{}, writer, .{cb});
+                cb.reader_thread = try std.Thread.spawn(.{}, reader, .{cb});
+            }
+            fn deinit(cb: *@This()) void {
+                cb.writer_thread.join();
+                cb.reader_thread.join();
+                cb.pipe.deinit();
+            }
 
-            const tw = rubr.comm.TreeWriter{ .out = &writer.interface };
+            fn writer(cb: *@This()) !void {
+                const tw = rubr.comm.TreeWriter{ .out = &cb.pipe.writer };
 
-            try tw.writeComposite(&replicate, prot.Replicate.Id);
-        }
+                try tw.writeComposite(cb.replicate, prot.Replicate.Id);
+            }
+            fn reader(cb: *@This()) !void {
+                var tr = rubr.comm.TreeReader{ .in = &cb.pipe.reader };
 
-        {
-            const file = try std.fs.cwd().openFile("output.dat", .{});
-            defer file.close();
+                var aa = std.heap.ArenaAllocator.init(cb.a);
+                defer aa.deinit();
 
-            var buffer: [1024]u8 = undefined;
-            var reader = file.reader(&buffer);
-
-            var tr = rubr.comm.TreeReader{ .in = &reader.interface };
-
-            var aa = std.heap.ArenaAllocator.init(self.a);
-            defer aa.deinit();
-
-            var rep = prot.Replicate.init(aa.allocator());
-            defer rep.deinit();
-            if (!try tr.readComposite(&rep, prot.Replicate.Id))
-                return Error.ExpectedReplicate;
-        }
+                var rep = prot.Replicate.init(aa.allocator());
+                defer rep.deinit();
+                if (!try tr.readComposite(&rep, prot.Replicate.Id))
+                    return Error.ExpectedReplicate;
+            }
+        };
+        var cb = Cb{ .a = self.a, .replicate = &replicate };
+        try cb.init();
+        defer cb.deinit();
     }
 
     fn runServer(self: *Self) !void {
