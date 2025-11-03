@@ -1348,6 +1348,7 @@ pub const pipe = struct {
             len: usize = 0,
             mutex: std.Thread.Mutex = .{},
             cond: std.Thread.Condition = .{},
+                data: [2][]u8 = undefined,
     
             fn is_empty(i: @This()) bool {
                 return i.len == 0;
@@ -1372,16 +1373,20 @@ pub const pipe = struct {
                     // Buffer is empty
                     // Set head to 0 to optimize placement
                     i.head = 0;
-                    return &.{};
+                        return i.data[0..0];
                 } else if (i.len == i.buffer.len) {
                     // Buffer is full
-                    return &[_][]u8{i.buffer};
+                        i.data[0] = i.buffer;
+                        return i.data[0..1];
                 } else if (i.head + i.len <= i.buffer.len) {
                     // Buffer is contiguous
-                    return &[_][]u8{i.buffer[i.head .. i.head + i.len]};
+                        i.data[0] = i.buffer[i.head .. i.head + i.len];
+                        return i.data[0..1];
                 } else {
                     // Buffer wraps over end
-                    return &[_][]u8{ i.buffer[i.head..], i.buffer[0 .. i.len - (i.buffer.len - i.head)] };
+                        i.data[0] = i.buffer[i.head..];
+                        i.data[1] = i.buffer[0 .. i.len - (i.buffer.len - i.head)];
+                        return i.data[0..2];
                 }
             }
             fn unused(i: *Intern) []const []u8 {
@@ -1389,23 +1394,28 @@ pub const pipe = struct {
                     // Buffer is empty: unused is the full buffer
                     // Set head to 0 to optimize placement
                     i.head = 0;
-                    return &[_][]u8{i.buffer};
+                        i.data[0] = i.buffer;
+                        return i.data[0..1];
                 } else if (i.len == i.buffer.len) {
                     // Buffer is full: unused is empty
-                    return &.{};
+                        return i.data[0..0];
                 } else if (i.head + i.len < i.buffer.len) {
                     // Buffer has unused space after
                     if (i.head == 0) {
                         // and no unused space in front
-                        return &[_][]u8{i.buffer[i.head + i.len ..]};
+                            i.data[0] = i.buffer[i.head + i.len ..];
+                            return i.data[0..1];
                     } else {
                         // and unused space in front
-                        return &[_][]u8{ i.buffer[i.head + i.len ..], i.buffer[0..i.head] };
+                            i.data[0] = i.buffer[i.head + i.len ..];
+                            i.data[1] = i.buffer[0..i.head];
+                            return i.data[0..2];
                     }
                 } else {
                     // Unused buffer is contiguous and runs till i.head
                     const len = i.buffer.len - i.len;
-                    return &[_][]u8{i.buffer[i.head - len .. i.head]};
+                        i.data[0] = i.buffer[i.head - len .. i.head];
+                        return i.data[0..1];
                 }
             }
         };

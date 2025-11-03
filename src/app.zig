@@ -137,15 +137,15 @@ pub const App = struct {
                 cb.reader_thread = try std.Thread.spawn(.{}, reader, .{cb});
             }
             fn deinit(cb: *@This()) void {
+                cb.pipe.deinit();
                 cb.writer_thread.join();
                 cb.reader_thread.join();
-                cb.pipe.deinit();
             }
 
             fn writer(cb: *@This()) !void {
                 const tw = rubr.comm.TreeWriter{ .out = &cb.pipe.writer };
 
-                try tw.writeComposite(cb.replicate, prot.Replicate.Id);
+                try tw.writeComposite(cb.replicate.*, prot.Replicate.Id);
             }
             fn reader(cb: *@This()) !void {
                 var tr = rubr.comm.TreeReader{ .in = &cb.pipe.reader };
