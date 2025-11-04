@@ -22,6 +22,9 @@
 			- Is this faster MT?
 		- Compute checksum
 			- Is this faster MT?
+- [*] Integrate Store into runTest()
+	- [ ] Create in rubr.fs.homeDir()/.config/syrc
+	- [ ] Use [32]u8 iso [64]u8 as Key in Store
 
 # Modules
 - crypto
