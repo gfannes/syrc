@@ -11,8 +11,8 @@ end
 desc 'Install'
 task :install do
     # mode = :safe
-    mode = :fast
-    # mode = :debug
+    # mode = :fast
+    mode = :debug
 
     m = {safe: :safe, fast: :fast}[mode]
     mode_str = m ? "--release=#{m}" : ''

@@ -102,19 +102,7 @@ pub const Session = struct {
         self.base = base;
 
         for (replicate.files.items) |file| {
-            if (file.content) |content| {
-                // &todo: Set file attributes
-                if (file.path) |path| {
-                    if (self.log.level(1)) |w|
-                        try w.print("Creating path {s}\n", .{path});
-                    // &perf: Keep track of already opened folders, without exceeding the file handle quota
-                    var dir = try base.makeOpenPath(path, .{});
-                    defer dir.close();
-                    try dir.writeFile(.{ .sub_path = file.name, .data = content });
-                } else {
-                    try base.writeFile(.{ .sub_path = file.name, .data = content });
-                }
-            }
+            _ = file;
         }
     }
 

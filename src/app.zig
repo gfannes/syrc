@@ -157,6 +157,8 @@ pub const App = struct {
                 defer rep.deinit();
                 if (!try tr.readComposite(&rep, prot.Replicate.Id))
                     return Error.ExpectedReplicate;
+
+                // Compute missing files
             }
         };
         var cb = Cb{ .a = self.a, .replicate = &replicate };
