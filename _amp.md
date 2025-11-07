@@ -14,19 +14,21 @@
 	- [/] List all files
 		- [x] Basic walking of CWD in [[app.zig]]
 	- [ ] Add attribute info
-	- [/] Add checksum info
+	- [x] Add checksum info
 		- Blake3 at 128bit is secure enough, faster and shorter
-		- [*] Use a thread pool directly to queue the checksum tasks
-			- [*] Limit the queue size with a semaphore, by default to the CPU count
+		- [ ] Use a thread pool directly to queue the checksum tasks
+			- [ ] Limit the queue size with a semaphore, by default to the CPU count
 		- Read files into buffers
 			- Is this faster MT?
 		- Compute checksum
 			- Is this faster MT?
 - [/] Integrate Store into runTest()
-	- [ ] Create in rubr.fs.homeDir()/.config/syrc
+	- [x] Create in rubr.fs.homeDir()/.config/syrc
 	- [x] Use [32]u8 iso [64]u8 as Key in Store: couple with crypto.Checksum
 	- [x] Implement basic API: check for content, add and extract
-	- [*] Compute missing content when receiving a Replicate command
+	- [x] Compute missing content when receiving a Replicate command
+	- [*] Support bidirectional comms in runTest()
+		- Use localhost stream
 
 # Modules
 - crypto

@@ -16,7 +16,6 @@ pub const FileState = struct {
     const Self = @This();
 
     a: std.mem.Allocator,
-    io: std.Io,
     path: ?[]const u8 = null,
     name: []const u8 = &.{},
     size: usize = 0,
@@ -24,13 +23,22 @@ pub const FileState = struct {
     attributes: Attributes = .{},
     timestamp: Timestamp = 0,
 
-    pub fn init(a: std.mem.Allocator, io: std.Io) Self {
-        return Self{ .a = a, .io = io };
+    pub fn init(a: std.mem.Allocator) Self {
+        return Self{ .a = a };
     }
     pub fn deinit(self: *Self) void {
         if (self.path) |path|
             self.a.free(path);
         self.a.free(self.name);
+    }
+
+    pub fn filename(self: Self, a: std.mem.Allocator) ![]const u8 {
+        if (self.path) |path| {
+            const parts = [_][]const u8{ path, "/", self.name };
+            return std.mem.concat(a, u8, &parts);
+        } else {
+            return a.dupe(u8, self.name);
+        }
     }
 
     pub fn writeComposite(self: Self, tw: anytype) !void {
@@ -162,7 +170,7 @@ pub fn collectFileStates(dir: std.fs.Dir, a: std.mem.Allocator, io: std.Io) !Fil
                 var buffer: [1024]u8 = undefined;
                 var r = file.reader(my.io, &buffer);
 
-                var file_state = FileState.init(my.a, my.io);
+                var file_state = FileState.init(my.a);
                 if (offsets.name != offsets.base)
                     file_state.path = try my.a.dupe(u8, path[offsets.base .. offsets.name - 1]);
                 file_state.name = try my.a.dupe(u8, path[offsets.name..]);

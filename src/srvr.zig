@@ -59,7 +59,7 @@ pub const Session = struct {
             var aa = std.heap.ArenaAllocator.init(self.a);
             defer aa.deinit();
 
-            var replicate = prot.Replicate.init(aa.allocator(), self.io);
+            var replicate = prot.Replicate.init(aa.allocator());
 
             if (try self.cio.receive(&replicate)) {
                 prot.printMessage(replicate, self.log);

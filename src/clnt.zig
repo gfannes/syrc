@@ -66,7 +66,7 @@ pub const Session = struct {
         }
 
         {
-            var replicate = prot.Replicate.init(self.a, self.io);
+            var replicate = prot.Replicate.init(self.a);
             defer replicate.deinit();
             replicate.base = try replicate.a.dupe(u8, self.base);
             replicate.files = try tree.collectFileStates(self.src_dir, self.a, self.io);

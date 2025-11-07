@@ -9,6 +9,7 @@ pub const Error = error{
     ExpectedRole,
     ExpectedStatus,
     ExpectedFileState,
+    ExpectedFilename,
     ExpectedCmd,
     ExpectedArg,
     UnexpectedData,
@@ -62,12 +63,11 @@ pub const Replicate = struct {
     pub const Id = 4;
 
     a: std.mem.Allocator,
-    io: std.Io,
     base: []const u8 = &.{},
     files: tree.FileStates = .{},
 
-    pub fn init(a: std.mem.Allocator, io: std.Io) Self {
-        return Self{ .a = a, .io = io };
+    pub fn init(a: std.mem.Allocator) Self {
+        return Self{ .a = a };
     }
     pub fn deinit(self: *Self) void {
         self.a.free(self.base);
@@ -102,7 +102,7 @@ pub const Replicate = struct {
         var files = tree.FileStates{};
         try files.resize(self.a, size);
         for (files.items) |*file| {
-            file.* = tree.FileState.init(self.a, self.io);
+            file.* = tree.FileState.init(self.a);
             if (!try tr.readComposite(file, 2))
                 return Error.ExpectedFileState;
         }
@@ -115,28 +115,50 @@ pub const Replicate = struct {
 
 pub const Missing = struct {
     const Self = @This();
+    const Filenames = std.ArrayList([]const u8);
     pub const Id = 6;
 
-    pub fn init() Self {
-        return Self{};
+    a: std.mem.Allocator,
+    filenames: Filenames = .{},
+
+    pub fn init(a: std.mem.Allocator) Self {
+        return Self{ .a = a };
     }
     pub fn deinit(self: *Self) void {
-        _ = self;
+        for (self.filenames.items) |filename|
+            self.a.free(filename);
+        self.filenames.deinit(self.a);
     }
 
     pub fn write(self: Self, parent: *rubr.naft.Node) void {
-        _ = self;
         var node = parent.node("prot.Missing");
         defer node.deinit();
+
+        for (self.filenames.items) |filename| {
+            var n = node.node("File");
+            defer n.deinit();
+            n.attr("name", filename);
+        }
     }
 
     pub fn writeComposite(self: Self, tw: anytype) !void {
-        _ = self;
-        _ = tw;
+        try tw.writeLeaf(self.filenames.items.len, 3);
+        for (self.filenames.items) |filename| {
+            try tw.writeLeaf(filename, 5);
+        }
     }
     pub fn readComposite(self: *Self, tr: anytype) !void {
-        _ = self;
-        _ = tr;
+        var size: usize = undefined;
+        if (!try tr.readLeaf(&size, 3, {}))
+            return Error.ExpectedSize;
+
+        var filenames = Filenames{};
+        try filenames.resize(self.a, size);
+        for (filenames.items) |*filename| {
+            if (!try tr.readLeaf(filename, 5, self.a))
+                return Error.ExpectedFilename;
+        }
+        self.filenames = filenames;
     }
 };
 

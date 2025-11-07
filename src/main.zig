@@ -34,7 +34,18 @@ pub fn main() !void {
     defer log.deinit();
     log.setLevel(cli_args.verbose);
 
-    var my_app = app.App.init(a, ioctx.io(), &log, cli_args.mode, cli_args.ip, cli_args.port, cli_args.base, cli_args.src, cli_args.extra.items);
+    var my_app = app.App.init(
+        a,
+        ioctx.io(),
+        &log,
+        cli_args.mode,
+        cli_args.ip,
+        cli_args.port,
+        cli_args.base,
+        cli_args.src,
+        cli_args.store_dir,
+        cli_args.extra.items,
+    );
     defer my_app.deinit();
 
     try my_app.run();

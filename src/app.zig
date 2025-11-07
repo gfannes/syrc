@@ -7,12 +7,14 @@ const crypto = @import("crypto.zig");
 const srvr = @import("srvr.zig");
 const clnt = @import("clnt.zig");
 const cpy = @import("cpy.zig");
+const store = @import("store.zig");
 
 pub const Error = error{
     ExpectedIp,
     ExpectedPort,
     ExpectedReplicate,
     ExpectedSrc,
+    ExpectedChecksum,
     NotImplemented,
 };
 
@@ -28,9 +30,11 @@ pub const App = struct {
     server: ?std.Io.net.Server = null,
     base: []const u8,
     src: ?[]const u8,
+    store_dir: []const u8,
     extra: []const []const u8,
+    filestore: store.Store,
 
-    pub fn init(a: std.mem.Allocator, io: std.Io, log: *const rubr.log.Log, mode: cli.Mode, ip: ?[]const u8, port: ?u16, base: []const u8, src: ?[]const u8, extra: []const []const u8) Self {
+    pub fn init(a: std.mem.Allocator, io: std.Io, log: *const rubr.log.Log, mode: cli.Mode, ip: ?[]const u8, port: ?u16, base: []const u8, src: ?[]const u8, store_dir: []const u8, extra: []const []const u8) Self {
         return Self{
             .a = a,
             .io = io,
@@ -40,16 +44,21 @@ pub const App = struct {
             .port = port,
             .base = base,
             .src = src,
+            .store_dir = store_dir,
             .extra = extra,
+            .filestore = store.Store.init(a),
         };
     }
     pub fn deinit(self: *Self) void {
         if (self.server) |*server|
             server.deinit(self.io);
+        self.filestore.deinit();
     }
 
     pub fn run(self: *Self) !void {
         try self.log.info("Running mode {any}\n", .{self.mode});
+
+        try self.filestore.open(self.store_dir);
 
         switch (self.mode) {
             cli.Mode.Client => try self.runClient(),
@@ -67,7 +76,6 @@ pub const App = struct {
 
         var replicate: prot.Replicate = .{
             .a = self.a,
-            .io = self.io,
             .base = try self.a.dupe(u8, "tmp"),
             .files = try tree.collectFileStates(src_dir, self.a, self.io),
         };
@@ -102,7 +110,7 @@ pub const App = struct {
             var aa = std.heap.ArenaAllocator.init(self.a);
             defer aa.deinit();
 
-            var rep = prot.Replicate.init(aa.allocator(), self.io);
+            var rep = prot.Replicate.init(aa.allocator());
             defer rep.deinit();
             if (!try tr.readComposite(&rep, prot.Replicate.Id))
                 return Error.ExpectedReplicate;
@@ -115,7 +123,6 @@ pub const App = struct {
 
         var replicate: prot.Replicate = .{
             .a = self.a,
-            .io = self.io,
             .base = try self.a.dupe(u8, "tmp"),
             .files = try tree.collectFileStates(src_dir, self.a, self.io),
         };
@@ -129,7 +136,9 @@ pub const App = struct {
         const Cb = struct {
             a: std.mem.Allocator,
             io: std.Io,
+            log: *const rubr.log.Log,
             replicate: *const prot.Replicate,
+            filestore: *store.Store,
             wb: [1024]u8 = undefined,
             ib: [1024]u8 = undefined,
             rb: [1024]u8 = undefined,
@@ -159,15 +168,29 @@ pub const App = struct {
                 var aa = std.heap.ArenaAllocator.init(cb.a);
                 defer aa.deinit();
 
-                var rep = prot.Replicate.init(aa.allocator(), cb.io);
+                var rep = prot.Replicate.init(aa.allocator());
                 defer rep.deinit();
                 if (!try tr.readComposite(&rep, prot.Replicate.Id))
                     return Error.ExpectedReplicate;
 
-                // Compute missing files
+                var missing = prot.Missing.init(aa.allocator());
+                defer missing.deinit();
+                for (rep.files.items) |file| {
+                    const checksum = file.checksum orelse return Error.ExpectedChecksum;
+                    if (cb.filestore.hasFile(checksum)) {
+                        std.debug.print("Found '{s}' in store\n", .{file.name});
+                    } else {
+                        try missing.filenames.append(missing.a, try file.filename(missing.a));
+                    }
+                }
+
+                if (cb.log.level(1)) |w| {
+                    var root = rubr.naft.Node.init(w);
+                    missing.write(&root);
+                }
             }
         };
-        var cb = Cb{ .a = self.a, .io = self.io, .replicate = &replicate };
+        var cb = Cb{ .a = self.a, .io = self.io, .log = self.log, .replicate = &replicate, .filestore = &self.filestore };
         try cb.init();
         defer cb.deinit();
     }
