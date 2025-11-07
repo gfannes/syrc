@@ -43,7 +43,7 @@ pub fn main() !void {
         cli_args.port,
         cli_args.base,
         cli_args.src,
-        cli_args.store_dir,
+        cli_args.store_absdir,
         cli_args.extra.items,
     );
     defer my_app.deinit();

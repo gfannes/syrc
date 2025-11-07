@@ -30,11 +30,10 @@ pub const App = struct {
     server: ?std.Io.net.Server = null,
     base: []const u8,
     src: ?[]const u8,
-    store_dir: []const u8,
+    store_absdir: []const u8,
     extra: []const []const u8,
-    filestore: store.Store,
 
-    pub fn init(a: std.mem.Allocator, io: std.Io, log: *const rubr.log.Log, mode: cli.Mode, ip: ?[]const u8, port: ?u16, base: []const u8, src: ?[]const u8, store_dir: []const u8, extra: []const []const u8) Self {
+    pub fn init(a: std.mem.Allocator, io: std.Io, log: *const rubr.log.Log, mode: cli.Mode, ip: ?[]const u8, port: ?u16, base: []const u8, src: ?[]const u8, store_absdir: []const u8, extra: []const []const u8) Self {
         return Self{
             .a = a,
             .io = io,
@@ -44,21 +43,17 @@ pub const App = struct {
             .port = port,
             .base = base,
             .src = src,
-            .store_dir = store_dir,
+            .store_absdir = store_absdir,
             .extra = extra,
-            .filestore = store.Store.init(a),
         };
     }
     pub fn deinit(self: *Self) void {
         if (self.server) |*server|
             server.deinit(self.io);
-        self.filestore.deinit();
     }
 
     pub fn run(self: *Self) !void {
         try self.log.info("Running mode {any}\n", .{self.mode});
-
-        try self.filestore.open(self.store_dir);
 
         switch (self.mode) {
             cli.Mode.Client => try self.runClient(),
@@ -133,7 +128,10 @@ pub const App = struct {
             replicate.write(&root);
         }
 
-        const Cb = struct {
+        var filestore = store.Store.init(self.a);
+        defer filestore.deinit();
+
+        var cb = struct {
             a: std.mem.Allocator,
             io: std.Io,
             log: *const rubr.log.Log,
@@ -189,10 +187,9 @@ pub const App = struct {
                     missing.write(&root);
                 }
             }
-        };
-        var cb = Cb{ .a = self.a, .io = self.io, .log = self.log, .replicate = &replicate, .filestore = &self.filestore };
-        try cb.init();
+        }{ .a = self.a, .io = self.io, .log = self.log, .replicate = &replicate, .filestore = &filestore };
         defer cb.deinit();
+        try cb.init();
     }
 
     fn runServer(self: *Self) !void {

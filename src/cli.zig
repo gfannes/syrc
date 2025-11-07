@@ -39,8 +39,8 @@ pub const Args = struct {
     mode: Mode = Mode.Test,
     j: usize,
     base: []const u8 = Default.base,
-    store_dir: []const u8 = Default.store_dir,
-    store_buf: [std.fs.max_path_bytes]u8 = undefined,
+    store_absdir: []const u8 = Default.store_dir,
+    store_absdir_buf: [std.fs.max_path_bytes]u8 = undefined,
     extra: Strings = .{},
 
     pub fn init(a: std.mem.Allocator) Self {
@@ -74,7 +74,7 @@ pub const Args = struct {
             } else if (arg.is("-p", "--port")) {
                 self.port = try (self.args.pop() orelse return Error.ExpectedPort).as(u16);
             } else if (arg.is("-s", "--store")) {
-                self.store_dir = (self.args.pop() orelse return Error.ExpectedFolder).arg;
+                self.store_absdir = (self.args.pop() orelse return Error.ExpectedFolder).arg;
             } else if (arg.is("-m", "--mode")) {
                 const mode = (self.args.pop() orelse return Error.ExpectedMode);
                 self.mode = if (mode.is("clnt", "client"))
@@ -97,8 +97,8 @@ pub const Args = struct {
         if (!std.fs.path.isAbsolute(self.src)) {
             self.src = try std.fs.cwd().realpath(self.src, &self.src_buf);
         }
-        if (!std.fs.path.isAbsolute(self.store_dir)) {
-            self.store_dir = try rubr.fs.homePath(self.store_dir, &self.store_buf);
+        if (!std.fs.path.isAbsolute(self.store_absdir)) {
+            self.store_absdir = try rubr.fs.homePath(self.store_absdir, &self.store_absdir_buf);
         }
     }
 
