@@ -1,19 +1,60 @@
 const std = @import("std");
 const crypto = @import("crypto.zig");
+const rubr = @import("rubr.zig");
+
+pub const Error = error{
+    ExpectedDir,
+    ExpectedSameSize,
+};
+
+pub const Key = crypto.Checksum;
+
+// Helper to convert Key into a two-level hex path
+const SubPath = struct {
+    const Self = @This();
+
+    buf: [2 * rubr.util.arrayLenOf(Key) + 2]u8 = undefined,
+
+    // Split Key into Subdir creating 2 layers of subdirs of 2 chars each, and the rest as the filename
+    fn init(key: Key) SubPath {
+        var res: SubPath = undefined;
+
+        res.buf[0..2].* = std.fmt.hex(key[0]);
+        res.buf[2] = std.fs.path.sep;
+
+        res.buf[3..5].* = std.fmt.hex(key[1]);
+        res.buf[5] = std.fs.path.sep;
+
+        res.buf[6..].* = std.fmt.bytesToHex(key[2..], .lower);
+
+        return res;
+    }
+
+    fn dir(self: *const Self) []const u8 {
+        return self.buf[0..5];
+    }
+    fn name(self: *const Self) []const u8 {
+        return self.buf[6..];
+    }
+    fn all(self: *const Self) []const u8 {
+        return &self.buf;
+    }
+};
 
 pub const Store = struct {
     const Self = @This();
-    pub const Key = crypto.Checksum;
-    const Subdir = [2 * Key.len + 2]u8;
+    const Buffer = std.ArrayList(u8);
 
     a: std.mem.Allocator,
     dir: ?std.fs.Dir = null,
+    tmp: Buffer = .{},
 
     pub fn init(a: std.mem.Allocator) Self {
         return Store{ .a = a };
     }
     pub fn deinit(self: *Self) void {
         self.close();
+        self.tmp.deinit(self.a);
     }
 
     // Creates `path` if it does not exist yet
@@ -28,41 +69,65 @@ pub const Store = struct {
         }
     }
 
-    // https://cfengine.com/blog/2024/efficient-data-copying-on-modern-linux/
-    // Use sendfile() or copy_file_range()
-    pub fn extract(self: *Self, key: Key, filename: []const u8) !bool {
-        _ = filename;
+    pub fn hasFile(self: *Self, key: Key) bool {
         if (self.dir) |dir| {
-            const subdir = toSubdir(key);
-            if (dir.openFile(subdir, .{})) |file| {
-                defer file.close();
+            const subpath = SubPath.init(key);
+            if (dir.openFile(subpath.all(), .{ .mode = .read_only })) |file| {
+                file.close();
                 return true;
-            } else |_| {
-                return false;
-            }
-        } else {
-            return false;
+            } else |_| {}
         }
+        return false;
     }
 
-    // Split Key into Subdir creating 2 layers of subdirs of 2 chars each, and the rest as the filename
-    fn toSubdir(key: Key) Subdir {
-        var subdir: Subdir = undefined;
+    pub fn addFile(self: *Self, key: Key, content: []const u8) !void {
+        const dir = self.dir orelse return Error.ExpectedDir;
 
-        subdir[0..2].* = std.fmt.hex(key[0]);
-        subdir[2] = std.fs.path.sep;
+        const subpath = SubPath.init(key);
 
-        subdir[3..5].* = std.fmt.hex(key[1]);
-        subdir[5] = std.fs.path.sep;
+        var subdir = try dir.makeOpenPath(subpath.dir(), .{});
+        defer subdir.close();
 
-        subdir[6..].* = std.fmt.bytesToHex(key[2..], .lower);
+        const file = try subdir.createFile(subpath.name(), .{});
+        defer file.close();
 
-        return subdir;
+        try file.writeAll(content);
+    }
+
+    // &todo: set attributes as well
+    // https://cfengine.com/blog/2024/efficient-data-copying-on-modern-linux/
+    // Use sendfile() or copy_file_range()
+    pub fn extractFile(self: *Self, key: Key, filename: []const u8) !bool {
+        {
+            const dir = self.dir orelse return Error.ExpectedDir;
+
+            const subpath = SubPath.init(key);
+
+            const file = dir.openFile(subpath.all(), .{ .mode = .read_only }) catch return false;
+            defer file.close();
+
+            const stat = try file.stat();
+            try self.tmp.resize(self.a, stat.size);
+            const size = try file.read(self.tmp.items);
+            if (size != stat.size)
+                return Error.ExpectedSameSize;
+        }
+
+        {
+            const file = if (std.fs.path.isAbsolute(filename))
+                try std.fs.createFileAbsolute(filename, .{})
+            else
+                try std.fs.cwd().createFile(filename, .{});
+            defer file.close();
+
+            try file.writeAll(self.tmp.items);
+        }
+
+        return true;
     }
 };
 
 test "store" {
-    const rubr = @import("rubr.zig");
     const ut = std.testing;
     const a = ut.allocator;
 
@@ -71,19 +136,25 @@ test "store" {
 
     const path = "tmp/store";
 
-    // Verify that `path` does not exist
+    // Ensure `path` does not exist
     try rubr.fs.deleteTree(path);
     try ut.expect(!rubr.fs.isDirectory(path));
 
     try store.open(path);
-
     try ut.expect(rubr.fs.isDirectory(path));
 
-    defer std.fs.cwd().deleteTree(path) catch {};
-
     try ut.expect(store.dir != null);
-    {
-        var dir = try std.fs.cwd().openDir(path, .{});
-        dir.close();
+
+    var key: Key = undefined;
+    for (&key, 0..) |*v, ix0| {
+        const ix: u8 = @intCast(ix0 + (ix0 << 4));
+        v.* = ix;
     }
+
+    try ut.expect(!store.hasFile(key));
+
+    try store.addFile(key, "Hello Store");
+    try ut.expect(store.hasFile(key));
+
+    try ut.expect(try store.extractFile(key, "myfile.txt"));
 }
