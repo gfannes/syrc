@@ -1,14 +1,10 @@
-// Output from `rake export[walker,cli,log,profile,naft,util,comm,pipe]` from https://github.com/gfannes/rubr from 2025-11-03
+// Output from `rake export[walker,cli,log,profile,naft,util,comm,pipe,fs]` from https://github.com/gfannes/rubr from 2025-11-06
 
 const std = @import("std");
 
 // Export from 'src/walker.zig'
 pub const walker = struct {
     // &todo Take `.gitignore` and `.ignore` into account
-    
-    const Error = error{
-        CouldNotReadIgnore,
-    };
     
     pub const Offsets = struct {
         base: usize = 0,
@@ -29,6 +25,7 @@ pub const walker = struct {
         filter: Filter = .{},
     
         a: std.mem.Allocator,
+        io: std.Io,
     
         // We keep track of the current path as a []const u8. If the caller has to do this,
         // he has to use Dir.realpath() which is less efficient.
@@ -40,8 +37,8 @@ pub const walker = struct {
     
         ignore_stack: IgnoreStack = .{},
     
-        pub fn init(a: std.mem.Allocator) Walker {
-            return Walker{ .a = a };
+        pub fn init(a: std.mem.Allocator, io: std.Io) Walker {
+            return Walker{ .a = a, .io = io };
         }
     
         pub fn deinit(self: *Walker) void {
@@ -81,8 +78,9 @@ pub const walker = struct {
     
                 var ig = Ignore{ .buffer = try Buffer.initCapacity(self.a, stat.size) };
                 try ig.buffer.resize(self.a, stat.size);
-                if (stat.size != try file.readAll(ig.buffer.items))
-                    return Error.CouldNotReadIgnore;
+                var buf: [1024]u8 = undefined;
+                var reader = file.reader(self.io, &buf);
+                try reader.interface.readSliceAll(ig.buffer.items);
     
                 ig.ignore = try ignore.Ignore.initFromContent(ig.buffer.items, self.a);
                 ig.path_len = self.path.len;
@@ -879,21 +877,21 @@ pub const profile = struct {
         const Self = @This();
     
         id: Id,
-        start: Timestamp,
+        start: std.time.Instant,
     
         pub fn init(id: Id) Scope {
             return Scope{ .id = id, .start = Self.now() };
         }
         pub fn deinit(self: Self) void {
-            const elapse = now() - self.start;
+            const elapse = now().since(self.start);
             measurements[@intFromEnum(self.id)].max = elapse;
             const a = @divFloor(elapse, 1_000_000_000);
             const b = elapse - a * 1_000_000_000;
             std.debug.print("elapse: {}.{:0>9.9}s\n", .{ a, @as(u64, @intCast(b)) });
         }
     
-        fn now() Timestamp {
-            return std.time.nanoTimestamp();
+        fn now() std.time.Instant {
+            return std.time.Instant.now() catch @panic("Cannot get current time");
         }
     };
     
@@ -1551,5 +1549,30 @@ pub const pipe = struct {
             return 0;
         }
     };
+    
+};
+
+// Export from 'src/fs.zig'
+pub const fs = struct {
+    pub fn homeDir(a: std.mem.Allocator) ![]u8 {
+        // &todo: Support Windows
+        return try std.process.getEnvVarOwned(a, "HOME");
+    }
+    
+    pub fn isDirectory(path: []const u8) bool {
+        const err_dir =
+            if (std.fs.path.isAbsolute(path))
+                std.fs.openDirAbsolute(path, .{})
+            else
+                std.fs.cwd().openDir(path, .{});
+        return if (err_dir) |_| true else |_| false;
+    }
+    
+    pub fn deleteTree(path: []const u8) !void {
+        if (std.fs.path.isAbsolute(path))
+            try std.fs.deleteTreeAbsolute(path)
+        else
+            try std.fs.cwd().deleteTree(path);
+    }
     
 };

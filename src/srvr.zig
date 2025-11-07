@@ -20,12 +20,13 @@ pub const Session = struct {
     const Self = @This();
 
     a: std.mem.Allocator,
+    io: std.Io,
     log: *const rubr.log.Log,
-    io: comm.Io = undefined,
+    cio: comm.Io = undefined,
     base: ?std.fs.Dir = null,
 
-    pub fn init(self: *Self, stream: std.net.Stream) void {
-        self.io.init(stream);
+    pub fn init(self: *Self, stream: std.Io.net.Stream) void {
+        self.cio.init(self.io, stream);
     }
     pub fn deinit(self: *Self) void {
         if (self.base) |*base|
@@ -39,14 +40,14 @@ pub const Session = struct {
         // Handshake
         {
             var hello: prot.Hello = undefined;
-            if (try self.io.receive2(&hello, &bye)) {
+            if (try self.cio.receive2(&hello, &bye)) {
                 prot.printMessage(hello, self.log);
                 if (hello.version != prot.My.version) {
                     try bye.setReason("Version mismatch: mine {} !=  peer {}", .{ prot.My.version, hello.version });
-                    try self.io.send(bye);
+                    try self.cio.send(bye);
                     return Error.VersionMismatch;
                 }
-                try self.io.send(prot.Hello{ .role = .Client, .status = .Ok });
+                try self.cio.send(prot.Hello{ .role = .Client, .status = .Ok });
             } else {
                 prot.printMessage(bye, self.log);
                 return Error.PeerGaveUp;
@@ -58,9 +59,9 @@ pub const Session = struct {
             var aa = std.heap.ArenaAllocator.init(self.a);
             defer aa.deinit();
 
-            var replicate = prot.Replicate.init(aa.allocator());
+            var replicate = prot.Replicate.init(aa.allocator(), self.io);
 
-            if (try self.io.receive(&replicate)) {
+            if (try self.cio.receive(&replicate)) {
                 prot.printMessage(replicate, self.log);
                 try self.doReplicate(replicate);
             }
@@ -73,14 +74,14 @@ pub const Session = struct {
 
             var run = prot.Run.init(aa.allocator());
 
-            if (try self.io.receive(&run)) {
+            if (try self.cio.receive(&run)) {
                 prot.printMessage(run, self.log);
                 try self.doRun(run);
             }
         }
 
         // Hangup
-        if (try self.io.receive(&bye))
+        if (try self.cio.receive(&bye))
             prot.printMessage(bye, self.log);
     }
 
@@ -128,8 +129,8 @@ pub const Session = struct {
         var maybe_stdout = proc.stdout;
         var maybe_stderr = proc.stderr;
         while (maybe_stdout != null or maybe_stderr != null) {
-            try processOutput(&maybe_stdout, .stdout);
-            try processOutput(&maybe_stderr, .stderr);
+            try processOutput(self.io, &maybe_stdout, .stdout);
+            try processOutput(self.io, &maybe_stderr, .stderr);
         }
 
         // &todo: Provide exit code to Client
@@ -138,19 +139,22 @@ pub const Session = struct {
     }
 
     const OutputKind = enum { stdout, stderr };
-    fn processOutput(maybe_output: *?std.fs.File, kind: OutputKind) !void {
+    fn processOutput(io: std.Io, maybe_output: *?std.fs.File, kind: OutputKind) !void {
         var buf: [1024]u8 = undefined;
         if (maybe_output.*) |output| {
+            var b: [1024]u8 = undefined;
+            var reader = output.reader(io, &b);
             while (true) {
-                const n = try output.readAll(&buf);
-                if (n == 0) {
+                const n = try reader.interface.readSliceShort(&buf);
+                if (n > 0) {
+                    // &todo: Provide output to Client
+                    std.debug.print("output: {} {}=>({s})\n", .{ kind, n, buf[0..n] });
+                }
+                if (n < buf.len) {
                     // End of file
                     maybe_output.* = null;
                     break;
                 }
-
-                // &todo: Provide output to Client
-                std.debug.print("output: {} {}=>({s})\n", .{ kind, n, buf[0..n] });
             }
         }
     }

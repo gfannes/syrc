@@ -6,6 +6,7 @@ const prot = @import("prot.zig");
 const crypto = @import("crypto.zig");
 const srvr = @import("srvr.zig");
 const clnt = @import("clnt.zig");
+const cpy = @import("cpy.zig");
 
 pub const Error = error{
     ExpectedIp,
@@ -19,18 +20,20 @@ pub const App = struct {
     const Self = @This();
 
     a: std.mem.Allocator,
+    io: std.Io,
     log: *const rubr.log.Log,
     mode: cli.Mode,
     ip: ?[]const u8 = null,
     port: ?u16 = null,
-    server: ?std.net.Server = null,
+    server: ?std.Io.net.Server = null,
     base: []const u8,
     src: ?[]const u8,
     extra: []const []const u8,
 
-    pub fn init(a: std.mem.Allocator, log: *const rubr.log.Log, mode: cli.Mode, ip: ?[]const u8, port: ?u16, base: []const u8, src: ?[]const u8, extra: []const []const u8) Self {
+    pub fn init(a: std.mem.Allocator, io: std.Io, log: *const rubr.log.Log, mode: cli.Mode, ip: ?[]const u8, port: ?u16, base: []const u8, src: ?[]const u8, extra: []const []const u8) Self {
         return Self{
             .a = a,
+            .io = io,
             .log = log,
             .mode = mode,
             .ip = ip,
@@ -42,7 +45,7 @@ pub const App = struct {
     }
     pub fn deinit(self: *Self) void {
         if (self.server) |*server|
-            server.deinit();
+            server.deinit(self.io);
     }
 
     pub fn run(self: *Self) !void {
@@ -64,8 +67,9 @@ pub const App = struct {
 
         var replicate: prot.Replicate = .{
             .a = self.a,
+            .io = self.io,
             .base = try self.a.dupe(u8, "tmp"),
-            .files = try tree.collectFileStates(src_dir, self.a),
+            .files = try tree.collectFileStates(src_dir, self.a, self.io),
         };
         defer replicate.deinit();
 
@@ -91,14 +95,14 @@ pub const App = struct {
             defer file.close();
 
             var buffer: [1024]u8 = undefined;
-            var reader = file.reader(&buffer);
+            var reader = file.reader(self.io, &buffer);
 
             var tr = rubr.comm.TreeReader{ .in = &reader.interface };
 
             var aa = std.heap.ArenaAllocator.init(self.a);
             defer aa.deinit();
 
-            var rep = prot.Replicate.init(aa.allocator());
+            var rep = prot.Replicate.init(aa.allocator(), self.io);
             defer rep.deinit();
             if (!try tr.readComposite(&rep, prot.Replicate.Id))
                 return Error.ExpectedReplicate;
@@ -111,8 +115,9 @@ pub const App = struct {
 
         var replicate: prot.Replicate = .{
             .a = self.a,
+            .io = self.io,
             .base = try self.a.dupe(u8, "tmp"),
-            .files = try tree.collectFileStates(src_dir, self.a),
+            .files = try tree.collectFileStates(src_dir, self.a, self.io),
         };
         defer replicate.deinit();
 
@@ -123,6 +128,7 @@ pub const App = struct {
 
         const Cb = struct {
             a: std.mem.Allocator,
+            io: std.Io,
             replicate: *const prot.Replicate,
             wb: [1024]u8 = undefined,
             ib: [1024]u8 = undefined,
@@ -153,7 +159,7 @@ pub const App = struct {
                 var aa = std.heap.ArenaAllocator.init(cb.a);
                 defer aa.deinit();
 
-                var rep = prot.Replicate.init(aa.allocator());
+                var rep = prot.Replicate.init(aa.allocator(), cb.io);
                 defer rep.deinit();
                 if (!try tr.readComposite(&rep, prot.Replicate.Id))
                     return Error.ExpectedReplicate;
@@ -161,7 +167,7 @@ pub const App = struct {
                 // Compute missing files
             }
         };
-        var cb = Cb{ .a = self.a, .replicate = &replicate };
+        var cb = Cb{ .a = self.a, .io = self.io, .replicate = &replicate };
         try cb.init();
         defer cb.deinit();
     }
@@ -170,20 +176,20 @@ pub const App = struct {
         const addr = try self.address();
         if (self.log.level(1)) |w|
             try w.print("Creating server on {f}\n", .{addr});
-        var server = try addr.listen(.{});
-        defer server.deinit();
+        var server = try addr.listen(self.io, .{});
+        defer server.deinit(self.io);
 
         while (true) {
             if (self.log.level(1)) |w|
                 try w.print("Waiting for connection...\n", .{});
 
-            var connection = try server.accept();
-            defer connection.stream.close();
+            var connection = try server.accept(self.io);
+            defer connection.close(self.io);
             if (self.log.level(1)) |w|
-                try w.print("Received connection {f}\n", .{connection.address});
+                try w.print("Received connection {f}\n", .{connection.socket.address});
 
-            var session = srvr.Session{ .a = self.a, .log = self.log };
-            session.init(connection.stream);
+            var session = srvr.Session{ .a = self.a, .io = self.io, .log = self.log };
+            session.init(connection);
             defer session.deinit();
 
             try session.execute();
@@ -191,18 +197,20 @@ pub const App = struct {
             // break;
         }
     }
+
     fn runClient(self: *Self) !void {
         const addr = try self.address();
         if (self.log.level(1)) |w|
             try w.print("Connecting to {f}\n", .{addr});
-        var stream = try std.net.tcpConnectToAddress(addr);
-        defer stream.close();
+        var stream = try addr.connect(self.io, .{ .mode = .stream });
+        defer stream.close(self.io);
 
         var src_dir = try std.fs.openDirAbsolute(self.src orelse return Error.ExpectedSrc, .{});
         defer src_dir.close();
 
         var session = clnt.Session{
             .a = self.a,
+            .io = self.io,
             .log = self.log,
             .base = self.base,
             .src_dir = src_dir,
@@ -215,9 +223,9 @@ pub const App = struct {
         try session.execute();
     }
 
-    fn address(self: Self) !std.net.Address {
+    fn address(self: Self) !std.Io.net.IpAddress {
         const ip = self.ip orelse return Error.ExpectedIp;
         const port = self.port orelse return Error.ExpectedPort;
-        return try std.net.Address.resolveIp(ip, port);
+        return try std.Io.net.IpAddress.resolve(self.io, ip, port);
     }
 };

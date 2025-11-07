@@ -16,6 +16,7 @@ pub const FileState = struct {
     const Self = @This();
 
     a: std.mem.Allocator,
+    io: std.Io,
     path: ?[]const u8 = null,
     name: []const u8 = &.{},
     size: usize = 0,
@@ -23,8 +24,8 @@ pub const FileState = struct {
     attributes: Attributes = .{},
     timestamp: Timestamp = 0,
 
-    pub fn init(a: std.mem.Allocator) Self {
-        return Self{ .a = a };
+    pub fn init(a: std.mem.Allocator, io: std.Io) Self {
+        return Self{ .a = a, .io = io };
     }
     pub fn deinit(self: *Self) void {
         if (self.path) |path|
@@ -118,20 +119,21 @@ pub const Timestamp = u32;
 
 pub const FileStates = std.ArrayList(FileState);
 
-pub fn collectFileStates(dir: std.fs.Dir, a: std.mem.Allocator) !FileStates {
+pub fn collectFileStates(dir: std.fs.Dir, a: std.mem.Allocator, io: std.Io) !FileStates {
     const Collector = struct {
         const My = @This();
         const Buffer = std.ArrayList(u8);
 
         a: std.mem.Allocator,
+        io: std.Io,
         dir: std.fs.Dir,
         file_states: FileStates = .{},
         walker: rubr.walker.Walker,
         total_size: u64 = 0,
         buffer: Buffer = .{},
 
-        fn init(dirr: std.fs.Dir, aa: std.mem.Allocator) My {
-            return My{ .dir = dirr, .a = aa, .walker = rubr.walker.Walker.init(aa) };
+        fn init(dirr: std.fs.Dir, aa: std.mem.Allocator, ioo: std.Io) My {
+            return My{ .dir = dirr, .a = aa, .io = ioo, .walker = rubr.walker.Walker.init(aa, ioo) };
         }
         fn deinit(my: *My) void {
             for (my.file_states.items) |*item|
@@ -158,9 +160,9 @@ pub fn collectFileStates(dir: std.fs.Dir, a: std.mem.Allocator) !FileStates {
                 std.debug.print("Path: {s}, my size: {}, total_size: {}\n", .{ path, my_size, my.total_size });
 
                 var buffer: [1024]u8 = undefined;
-                var r = file.reader(&buffer);
+                var r = file.reader(my.io, &buffer);
 
-                var file_state = FileState.init(my.a);
+                var file_state = FileState.init(my.a, my.io);
                 if (offsets.name != offsets.base)
                     file_state.path = try my.a.dupe(u8, path[offsets.base .. offsets.name - 1]);
                 file_state.name = try my.a.dupe(u8, path[offsets.name..]);
@@ -176,7 +178,7 @@ pub fn collectFileStates(dir: std.fs.Dir, a: std.mem.Allocator) !FileStates {
         }
     };
 
-    var collector = Collector.init(dir, a);
+    var collector = Collector.init(dir, a, io);
     defer collector.deinit();
 
     try collector.collect();

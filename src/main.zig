@@ -13,6 +13,9 @@ pub fn main() !void {
 
     const a = gpa.allocator();
 
+    var ioctx = std.Io.Threaded.init(a);
+    defer ioctx.deinit();
+
     var config = cfg.Config.init(a);
     defer config.deinit();
     try config.load();
@@ -31,7 +34,7 @@ pub fn main() !void {
     defer log.deinit();
     log.setLevel(cli_args.verbose);
 
-    var my_app = app.App.init(a, &log, cli_args.mode, cli_args.ip, cli_args.port, cli_args.base, cli_args.src, cli_args.extra.items);
+    var my_app = app.App.init(a, ioctx.io(), &log, cli_args.mode, cli_args.ip, cli_args.port, cli_args.base, cli_args.src, cli_args.extra.items);
     defer my_app.deinit();
 
     try my_app.run();

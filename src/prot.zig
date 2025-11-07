@@ -62,11 +62,12 @@ pub const Replicate = struct {
     pub const Id = 4;
 
     a: std.mem.Allocator,
+    io: std.Io,
     base: []const u8 = &.{},
     files: tree.FileStates = .{},
 
-    pub fn init(a: std.mem.Allocator) Self {
-        return Self{ .a = a };
+    pub fn init(a: std.mem.Allocator, io: std.Io) Self {
+        return Self{ .a = a, .io = io };
     }
     pub fn deinit(self: *Self) void {
         self.a.free(self.base);
@@ -101,7 +102,7 @@ pub const Replicate = struct {
         var files = tree.FileStates{};
         try files.resize(self.a, size);
         for (files.items) |*file| {
-            file.* = tree.FileState.init(self.a);
+            file.* = tree.FileState.init(self.a, self.io);
             if (!try tr.readComposite(file, 2))
                 return Error.ExpectedFileState;
         }

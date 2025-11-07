@@ -1,9 +1,10 @@
 const std = @import("std");
+const crypto = @import("crypto.zig");
 
 pub const Store = struct {
     const Self = @This();
-    pub const Key = [64]u8;
-    const Subdir = [Key.len + 2]u8;
+    pub const Key = crypto.Checksum;
+    const Subdir = [2 * Key.len + 2]u8;
 
     a: std.mem.Allocator,
     dir: ?std.fs.Dir = null,
@@ -15,6 +16,7 @@ pub const Store = struct {
         self.close();
     }
 
+    // Creates `path` if it does not exist yet
     pub fn open(self: *Self, path: []const u8) !void {
         self.close();
         self.dir = try std.fs.cwd().makeOpenPath(path, .{});
@@ -47,21 +49,20 @@ pub const Store = struct {
     fn toSubdir(key: Key) Subdir {
         var subdir: Subdir = undefined;
 
-        subdir[0] = key[0];
-        subdir[1] = key[1];
+        subdir[0..2].* = std.fmt.hex(key[0]);
         subdir[2] = std.fs.path.sep;
 
-        subdir[3] = key[2];
-        subdir[4] = key[3];
+        subdir[3..5].* = std.fmt.hex(key[1]);
         subdir[5] = std.fs.path.sep;
 
-        std.mem.copyForward(u8, subdir[6..], key[4..]);
+        subdir[6..].* = std.fmt.bytesToHex(key[2..], .lower);
 
         return subdir;
     }
 };
 
-test "create" {
+test "store" {
+    const rubr = @import("rubr.zig");
     const ut = std.testing;
     const a = ut.allocator;
 
@@ -70,15 +71,14 @@ test "create" {
 
     const path = "tmp/store";
 
-    {
-        var result_dir = std.fs.cwd().openDir(path, .{});
-        defer if (result_dir) |*dir| {
-            dir.close();
-        } else |_| {};
-        try ut.expectError(error.FileNotFound, result_dir);
-    }
+    // Verify that `path` does not exist
+    try rubr.fs.deleteTree(path);
+    try ut.expect(!rubr.fs.isDirectory(path));
 
     try store.open(path);
+
+    try ut.expect(rubr.fs.isDirectory(path));
+
     defer std.fs.cwd().deleteTree(path) catch {};
 
     try ut.expect(store.dir != null);

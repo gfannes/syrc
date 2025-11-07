@@ -21,16 +21,17 @@ pub const Session = struct {
     const Self = @This();
 
     a: std.mem.Allocator,
+    io: std.Io,
     log: *const rubr.log.Log,
     base: []const u8,
     src_dir: std.fs.Dir,
 
     maybe_cmd: ?[]const u8 = null,
     args: []const []const u8 = &.{},
-    io: comm.Io = undefined,
+    cio: comm.Io = undefined,
 
-    pub fn init(self: *Self, stream: std.net.Stream) void {
-        self.io.init(stream);
+    pub fn init(self: *Self, stream: std.Io.net.Stream) void {
+        self.cio.init(self.io, stream);
     }
     pub fn deinit(self: *Self) void {
         _ = self;
@@ -47,15 +48,15 @@ pub const Session = struct {
         var bye = prot.Bye.init(self.a);
         defer bye.deinit();
 
-        try self.io.send(prot.Hello{ .role = .Client, .status = .Pending });
+        try self.cio.send(prot.Hello{ .role = .Client, .status = .Pending });
 
         {
             var hello: prot.Hello = undefined;
-            if (try self.io.receive2(&hello, &bye)) {
+            if (try self.cio.receive2(&hello, &bye)) {
                 prot.printMessage(hello, self.log);
                 if (hello.status != .Ok) {
                     try bye.setReason("Expected status Ok, not {}", .{hello.status});
-                    try self.io.send(bye);
+                    try self.cio.send(bye);
                     return Error.ExpectedStatusOk;
                 }
             } else {
@@ -65,12 +66,12 @@ pub const Session = struct {
         }
 
         {
-            var replicate = prot.Replicate.init(self.a);
+            var replicate = prot.Replicate.init(self.a, self.io);
             defer replicate.deinit();
             replicate.base = try replicate.a.dupe(u8, self.base);
-            replicate.files = try tree.collectFileStates(self.src_dir, self.a);
+            replicate.files = try tree.collectFileStates(self.src_dir, self.a, self.io);
 
-            try self.io.send(replicate);
+            try self.cio.send(replicate);
         }
 
         if (self.maybe_cmd) |cmd| {
@@ -80,9 +81,9 @@ pub const Session = struct {
             for (self.args) |arg|
                 try run.args.append(self.a, try run.a.dupe(u8, arg));
 
-            try self.io.send(run);
+            try self.cio.send(run);
         }
 
-        try self.io.send(bye);
+        try self.cio.send(bye);
     }
 };

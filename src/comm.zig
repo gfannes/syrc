@@ -15,16 +15,16 @@ pub const Io = struct {
     readbuf: [1024]u8 = undefined,
     writebuf: [1024]u8 = undefined,
 
-    reader: std.net.Stream.Reader = undefined,
-    writer: std.net.Stream.Writer = undefined,
+    reader: std.Io.net.Stream.Reader = undefined,
+    writer: std.Io.net.Stream.Writer = undefined,
 
     tr: TreeReader = undefined,
     tw: TreeWriter = undefined,
 
-    pub fn init(self: *Self, stream: std.net.Stream) void {
-        self.reader = stream.reader(&self.readbuf);
-        self.writer = stream.writer(&self.writebuf);
-        self.tr = TreeReader{ .in = self.reader.interface() };
+    pub fn init(self: *Self, io: std.Io, stream: std.Io.net.Stream) void {
+        self.reader = stream.reader(io, &self.readbuf);
+        self.writer = stream.writer(io, &self.writebuf);
+        self.tr = TreeReader{ .in = &self.reader.interface };
         self.tw = TreeWriter{ .out = &self.writer.interface };
     }
 
