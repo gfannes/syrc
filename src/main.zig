@@ -3,24 +3,23 @@ const app = @import("app.zig");
 const cli = @import("cli.zig");
 const cfg = @import("cfg.zig");
 const rubr = @import("rubr.zig");
+const Env = @import("Env.zig");
 
 pub fn main() !void {
     const s = rubr.profile.Scope.init(.A);
     defer s.deinit();
 
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
-    defer _ = gpa.deinit();
+    var env_inst = Env.Instance{};
+    env_inst.init();
+    defer env_inst.deinit();
 
-    const a = gpa.allocator();
+    const env = env_inst.env();
 
-    var ioctx = std.Io.Threaded.init(a);
-    defer ioctx.deinit();
-
-    var config = cfg.Config.init(a);
+    var config = cfg.Config.init(env.a);
     defer config.deinit();
     try config.load();
 
-    var cli_args = cli.Args.init(a);
+    var cli_args = cli.Args.init(env.a);
     defer cli_args.deinit();
     try cli_args.parse();
 
@@ -35,15 +34,13 @@ pub fn main() !void {
     log.setLevel(cli_args.verbose);
 
     var my_app = app.App.init(
-        a,
-        ioctx.io(),
-        &log,
+        env,
         cli_args.mode,
         cli_args.ip,
         cli_args.port,
         cli_args.base,
         cli_args.src,
-        cli_args.store_absdir,
+        cli_args.store_path.path(),
         cli_args.extra.items,
     );
     defer my_app.deinit();

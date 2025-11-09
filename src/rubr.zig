@@ -1,4 +1,4 @@
-// Output from `rake export[walker,cli,log,profile,naft,util,comm,pipe,fs]` from https://github.com/gfannes/rubr from 2025-11-07
+// Output from `rake export[walker,cli,log,profile,naft,util,comm,pipe,fs]` from https://github.com/gfannes/rubr from 2025-11-09
 
 const std = @import("std");
 
@@ -1556,6 +1556,45 @@ pub const pipe = struct {
 pub const fs = struct {
     pub const Error = error{
         BufferTooSmall,
+    };
+    
+    pub const Path = struct {
+        const Self = @This();
+        pub const max_len = std.fs.max_path_bytes;
+    
+        buffer: [Self.max_len]u8 = undefined,
+        len: usize = 0,
+    
+        pub fn set(self: *Self, str: []const u8) !void {
+            if (str.len > max_len)
+                return Error.BufferTooSmall;
+            self.len = str.len;
+            @memcpy(self.buffer[0..self.len], str);
+        }
+    
+        pub fn home() !Self {
+            var res = Self{};
+            var fba = std.heap.FixedBufferAllocator.init(&res.buffer);
+            const env_var = try std.process.getEnvVarOwned(fba.allocator(), "HOME");
+            res.len = env_var.len;
+            @memmove(res.buffer[0..res.len], env_var);
+            return res;
+        }
+    
+        pub fn add(self: *Self, part: []const u8) !void {
+            if (self.len + 1 + part.len > max_len)
+                return Error.BufferTooSmall;
+            if (self.len > 0) {
+                self.buffer[self.len] = '/';
+                self.len += 1;
+            }
+            @memcpy(self.buffer[self.len .. self.len + part.len], part);
+            self.len += part.len;
+        }
+    
+        pub fn path(self: Self) []const u8 {
+            return self.buffer[0..self.len];
+        }
     };
     
     pub fn homeDir(a: std.mem.Allocator) ![]u8 {

@@ -1,6 +1,7 @@
 const std = @import("std");
 const crypto = @import("crypto.zig");
 const rubr = @import("rubr.zig");
+const Env = @import("Env.zig");
 
 pub const Error = error{
     ExpectedName,
@@ -127,28 +128,27 @@ pub const Timestamp = u32;
 
 pub const FileStates = std.ArrayList(FileState);
 
-pub fn collectFileStates(dir: std.fs.Dir, a: std.mem.Allocator, io: std.Io) !FileStates {
+pub fn collectFileStates(dir: std.fs.Dir, env: Env) !FileStates {
     const Collector = struct {
         const My = @This();
         const Buffer = std.ArrayList(u8);
 
-        a: std.mem.Allocator,
-        io: std.Io,
+        env: Env,
         dir: std.fs.Dir,
         file_states: FileStates = .{},
         walker: rubr.walker.Walker,
         total_size: u64 = 0,
         buffer: Buffer = .{},
 
-        fn init(dirr: std.fs.Dir, aa: std.mem.Allocator, ioo: std.Io) My {
-            return My{ .dir = dirr, .a = aa, .io = ioo, .walker = rubr.walker.Walker.init(aa, ioo) };
+        fn init(dirr: std.fs.Dir, envv: Env) My {
+            return My{ .dir = dirr, .env = envv, .walker = rubr.walker.Walker.init(envv.a, envv.io) };
         }
         fn deinit(my: *My) void {
             for (my.file_states.items) |*item|
                 item.deinit();
-            my.file_states.deinit(my.a);
+            my.file_states.deinit(my.env.a);
             my.walker.deinit();
-            my.buffer.deinit(my.a);
+            my.buffer.deinit(my.env.a);
         }
 
         fn collect(my: *My) !void {
@@ -168,25 +168,25 @@ pub fn collectFileStates(dir: std.fs.Dir, a: std.mem.Allocator, io: std.Io) !Fil
                 std.debug.print("Path: {s}, my size: {}, total_size: {}\n", .{ path, my_size, my.total_size });
 
                 var buffer: [1024]u8 = undefined;
-                var r = file.reader(my.io, &buffer);
+                var r = file.reader(my.env.io, &buffer);
 
-                var file_state = FileState.init(my.a);
+                var file_state = FileState.init(my.env.a);
                 if (offsets.name != offsets.base)
-                    file_state.path = try my.a.dupe(u8, path[offsets.base .. offsets.name - 1]);
-                file_state.name = try my.a.dupe(u8, path[offsets.name..]);
+                    file_state.path = try my.env.a.dupe(u8, path[offsets.base .. offsets.name - 1]);
+                file_state.name = try my.env.a.dupe(u8, path[offsets.name..]);
                 file_state.size = my_size;
 
-                try my.buffer.resize(my.a, my_size);
+                try my.buffer.resize(my.env.a, my_size);
                 const content = my.buffer.items;
                 try r.interface.readSliceAll(content);
                 file_state.checksum = crypto.checksum(content);
 
-                try my.file_states.append(my.a, file_state);
+                try my.file_states.append(my.env.a, file_state);
             }
         }
     };
 
-    var collector = Collector.init(dir, a, io);
+    var collector = Collector.init(dir, env);
     defer collector.deinit();
 
     try collector.collect();

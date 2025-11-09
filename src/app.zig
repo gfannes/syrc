@@ -8,6 +8,7 @@ const srvr = @import("srvr.zig");
 const clnt = @import("clnt.zig");
 const cpy = @import("cpy.zig");
 const store = @import("store.zig");
+const Env = @import("Env.zig");
 
 pub const Error = error{
     ExpectedIp,
@@ -21,9 +22,7 @@ pub const Error = error{
 pub const App = struct {
     const Self = @This();
 
-    a: std.mem.Allocator,
-    io: std.Io,
-    log: *const rubr.log.Log,
+    env: Env,
     mode: cli.Mode,
     ip: ?[]const u8 = null,
     port: ?u16 = null,
@@ -33,11 +32,9 @@ pub const App = struct {
     store_absdir: []const u8,
     extra: []const []const u8,
 
-    pub fn init(a: std.mem.Allocator, io: std.Io, log: *const rubr.log.Log, mode: cli.Mode, ip: ?[]const u8, port: ?u16, base: []const u8, src: ?[]const u8, store_absdir: []const u8, extra: []const []const u8) Self {
+    pub fn init(env: Env, mode: cli.Mode, ip: ?[]const u8, port: ?u16, base: []const u8, src: ?[]const u8, store_absdir: []const u8, extra: []const []const u8) Self {
         return Self{
-            .a = a,
-            .io = io,
-            .log = log,
+            .env = env,
             .mode = mode,
             .ip = ip,
             .port = port,
@@ -49,11 +46,11 @@ pub const App = struct {
     }
     pub fn deinit(self: *Self) void {
         if (self.server) |*server|
-            server.deinit(self.io);
+            server.deinit(self.env.io);
     }
 
     pub fn run(self: *Self) !void {
-        try self.log.info("Running mode {any}\n", .{self.mode});
+        try self.env.log.info("Running mode {any}\n", .{self.mode});
 
         switch (self.mode) {
             cli.Mode.Client => try self.runClient(),
@@ -70,13 +67,13 @@ pub const App = struct {
         defer src_dir.close();
 
         var replicate: prot.Replicate = .{
-            .a = self.a,
-            .base = try self.a.dupe(u8, "tmp"),
-            .files = try tree.collectFileStates(src_dir, self.a, self.io),
+            .a = self.env.a,
+            .base = try self.env.a.dupe(u8, "tmp"),
+            .files = try tree.collectFileStates(src_dir, self.env),
         };
         defer replicate.deinit();
 
-        if (self.log.level(1)) |w| {
+        if (self.env.log.level(1)) |w| {
             var root = rubr.naft.Node.init(w);
             replicate.write(&root);
         }
@@ -98,11 +95,11 @@ pub const App = struct {
             defer file.close();
 
             var buffer: [1024]u8 = undefined;
-            var reader = file.reader(self.io, &buffer);
+            var reader = file.reader(self.env.io, &buffer);
 
             var tr = rubr.comm.TreeReader{ .in = &reader.interface };
 
-            var aa = std.heap.ArenaAllocator.init(self.a);
+            var aa = std.heap.ArenaAllocator.init(self.env.a);
             defer aa.deinit();
 
             var rep = prot.Replicate.init(aa.allocator());
@@ -117,24 +114,22 @@ pub const App = struct {
         defer src_dir.close();
 
         var replicate: prot.Replicate = .{
-            .a = self.a,
-            .base = try self.a.dupe(u8, "tmp"),
-            .files = try tree.collectFileStates(src_dir, self.a, self.io),
+            .a = self.env.a,
+            .base = try self.env.a.dupe(u8, "tmp"),
+            .files = try tree.collectFileStates(src_dir, self.env),
         };
         defer replicate.deinit();
 
-        if (self.log.level(1)) |w| {
+        if (self.env.log.level(1)) |w| {
             var root = rubr.naft.Node.init(w);
             replicate.write(&root);
         }
 
-        var filestore = store.Store.init(self.a);
+        var filestore = store.Store.init(self.env.a);
         defer filestore.deinit();
 
         var cb = struct {
-            a: std.mem.Allocator,
-            io: std.Io,
-            log: *const rubr.log.Log,
+            env: Env,
             replicate: *const prot.Replicate,
             filestore: *store.Store,
             wb: [1024]u8 = undefined,
@@ -163,7 +158,7 @@ pub const App = struct {
             fn reader(cb: *@This()) !void {
                 var tr = rubr.comm.TreeReader{ .in = &cb.pipe.reader };
 
-                var aa = std.heap.ArenaAllocator.init(cb.a);
+                var aa = std.heap.ArenaAllocator.init(cb.env.a);
                 defer aa.deinit();
 
                 var rep = prot.Replicate.init(aa.allocator());
@@ -182,33 +177,33 @@ pub const App = struct {
                     }
                 }
 
-                if (cb.log.level(1)) |w| {
+                if (cb.env.log.level(1)) |w| {
                     var root = rubr.naft.Node.init(w);
                     missing.write(&root);
                 }
             }
-        }{ .a = self.a, .io = self.io, .log = self.log, .replicate = &replicate, .filestore = &filestore };
+        }{ .env = self.env, .replicate = &replicate, .filestore = &filestore };
         defer cb.deinit();
         try cb.init();
     }
 
     fn runServer(self: *Self) !void {
         const addr = try self.address();
-        if (self.log.level(1)) |w|
+        if (self.env.log.level(1)) |w|
             try w.print("Creating server on {f}\n", .{addr});
-        var server = try addr.listen(self.io, .{});
-        defer server.deinit(self.io);
+        var server = try addr.listen(self.env.io, .{});
+        defer server.deinit(self.env.io);
 
         while (true) {
-            if (self.log.level(1)) |w|
+            if (self.env.log.level(1)) |w|
                 try w.print("Waiting for connection...\n", .{});
 
-            var connection = try server.accept(self.io);
-            defer connection.close(self.io);
-            if (self.log.level(1)) |w|
+            var connection = try server.accept(self.env.io);
+            defer connection.close(self.env.io);
+            if (self.env.log.level(1)) |w|
                 try w.print("Received connection {f}\n", .{connection.socket.address});
 
-            var session = srvr.Session{ .a = self.a, .io = self.io, .log = self.log };
+            var session = srvr.Session{ .env = self.env };
             session.init(connection);
             defer session.deinit();
 
@@ -220,18 +215,16 @@ pub const App = struct {
 
     fn runClient(self: *Self) !void {
         const addr = try self.address();
-        if (self.log.level(1)) |w|
+        if (self.env.log.level(1)) |w|
             try w.print("Connecting to {f}\n", .{addr});
-        var stream = try addr.connect(self.io, .{ .mode = .stream });
-        defer stream.close(self.io);
+        var stream = try addr.connect(self.env.io, .{ .mode = .stream });
+        defer stream.close(self.env.io);
 
         var src_dir = try std.fs.openDirAbsolute(self.src orelse return Error.ExpectedSrc, .{});
         defer src_dir.close();
 
         var session = clnt.Session{
-            .a = self.a,
-            .io = self.io,
-            .log = self.log,
+            .env = self.env,
             .base = self.base,
             .src_dir = src_dir,
         };
@@ -246,6 +239,6 @@ pub const App = struct {
     fn address(self: Self) !std.Io.net.IpAddress {
         const ip = self.ip orelse return Error.ExpectedIp;
         const port = self.port orelse return Error.ExpectedPort;
-        return try std.Io.net.IpAddress.resolve(self.io, ip, port);
+        return try std.Io.net.IpAddress.resolve(self.env.io, ip, port);
     }
 };
