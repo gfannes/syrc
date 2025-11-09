@@ -11,12 +11,50 @@ pub const Error = error{
     ExpectedReplicate,
     ExpectedRun,
     ExpectedBye,
+    ExpectedListeningServer,
     EmptyBaseFolder,
     BaseAlreadySet,
     BaseNotSet,
     UnknownId,
     VersionMismatch,
     PeerGaveUp,
+};
+
+pub const Server = struct {
+    const Self = @This();
+
+    env: Env,
+    address: std.Io.net.IpAddress,
+    server: ?std.Io.net.Server = null,
+
+    pub fn init(self: *Self) !void {
+        if (self.env.log.level(1)) |w|
+            try w.print("Creating server on {f}\n", .{self.address});
+        self.server = try self.address.listen(self.env.io, .{});
+    }
+
+    pub fn deinit(self: *Self) void {
+        if (self.server) |*server|
+            server.deinit(self.env.io);
+    }
+
+    pub fn processOne(self: *Self) !void {
+        var server = self.server orelse return Error.ExpectedListeningServer;
+
+        if (self.env.log.level(1)) |w|
+            try w.print("Waiting for connection...\n", .{});
+
+        var connection = try server.accept(self.env.io);
+        defer connection.close(self.env.io);
+        if (self.env.log.level(1)) |w|
+            try w.print("Received connection {f}\n", .{connection.socket.address});
+
+        var session = Session{ .env = self.env };
+        session.init(connection);
+        defer session.deinit();
+
+        try session.execute();
+    }
 };
 
 pub const Session = struct {

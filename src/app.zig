@@ -110,125 +110,54 @@ pub const App = struct {
     }
 
     fn runTest(self: *Self) !void {
-        var src_dir = try std.fs.openDirAbsolute(self.src orelse return Error.ExpectedSrc, .{});
-        defer src_dir.close();
+        const addr = try self.address();
 
-        var replicate: prot.Replicate = .{
-            .a = self.env.a,
-            .base = try self.env.a.dupe(u8, "tmp"),
-            .files = try tree.collectFileStates(src_dir, self.env),
+        var server = srvr.Server{
+            .env = self.env,
+            .address = addr,
         };
-        defer replicate.deinit();
+        defer server.deinit();
+        try server.init();
 
-        if (self.env.log.level(1)) |w| {
-            var root = rubr.naft.Node.init(w);
-            replicate.write(&root);
-        }
+        var server_thread = try std.Thread.spawn(.{}, srvr.Server.processOne, .{&server});
+        defer server_thread.join();
 
-        var filestore = store.Store.init(self.env.a);
-        defer filestore.deinit();
+        var client = clnt.Session{
+            .env = self.env,
+            .address = addr,
+            .base = self.base,
+            .src = self.src orelse return Error.ExpectedSrc,
+        };
+        defer client.deinit();
+        try client.init();
 
-        var cb = struct {
-            env: Env,
-            replicate: *const prot.Replicate,
-            filestore: *store.Store,
-            wb: [1024]u8 = undefined,
-            ib: [1024]u8 = undefined,
-            rb: [1024]u8 = undefined,
-            pipe: rubr.pipe.Pipe = undefined,
-            writer_thread: std.Thread = undefined,
-            reader_thread: std.Thread = undefined,
-
-            fn init(cb: *@This()) !void {
-                cb.pipe = rubr.pipe.Pipe.init(&cb.wb, &cb.ib, &cb.rb);
-                cb.writer_thread = try std.Thread.spawn(.{}, writer, .{cb});
-                cb.reader_thread = try std.Thread.spawn(.{}, reader, .{cb});
-            }
-            fn deinit(cb: *@This()) void {
-                cb.pipe.deinit();
-                cb.writer_thread.join();
-                cb.reader_thread.join();
-            }
-
-            fn writer(cb: *@This()) !void {
-                const tw = rubr.comm.TreeWriter{ .out = &cb.pipe.writer };
-
-                try tw.writeComposite(cb.replicate.*, prot.Replicate.Id);
-            }
-            fn reader(cb: *@This()) !void {
-                var tr = rubr.comm.TreeReader{ .in = &cb.pipe.reader };
-
-                var aa = std.heap.ArenaAllocator.init(cb.env.a);
-                defer aa.deinit();
-
-                var rep = prot.Replicate.init(aa.allocator());
-                defer rep.deinit();
-                if (!try tr.readComposite(&rep, prot.Replicate.Id))
-                    return Error.ExpectedReplicate;
-
-                var missing = prot.Missing.init(aa.allocator());
-                defer missing.deinit();
-                for (rep.files.items) |file| {
-                    const checksum = file.checksum orelse return Error.ExpectedChecksum;
-                    if (cb.filestore.hasFile(checksum)) {
-                        std.debug.print("Found '{s}' in store\n", .{file.name});
-                    } else {
-                        try missing.filenames.append(missing.a, try file.filename(missing.a));
-                    }
-                }
-
-                if (cb.env.log.level(1)) |w| {
-                    var root = rubr.naft.Node.init(w);
-                    missing.write(&root);
-                }
-            }
-        }{ .env = self.env, .replicate = &replicate, .filestore = &filestore };
-        defer cb.deinit();
-        try cb.init();
+        var client_thread = try std.Thread.spawn(.{}, clnt.Session.execute, .{&client});
+        defer client_thread.join();
     }
 
     fn runServer(self: *Self) !void {
-        const addr = try self.address();
-        if (self.env.log.level(1)) |w|
-            try w.print("Creating server on {f}\n", .{addr});
-        var server = try addr.listen(self.env.io, .{});
-        defer server.deinit(self.env.io);
+        var server = srvr.Server{
+            .env = self.env,
+            .address = try self.address(),
+        };
+        defer server.deinit();
+        try server.init();
 
         while (true) {
-            if (self.env.log.level(1)) |w|
-                try w.print("Waiting for connection...\n", .{});
-
-            var connection = try server.accept(self.env.io);
-            defer connection.close(self.env.io);
-            if (self.env.log.level(1)) |w|
-                try w.print("Received connection {f}\n", .{connection.socket.address});
-
-            var session = srvr.Session{ .env = self.env };
-            session.init(connection);
-            defer session.deinit();
-
-            try session.execute();
+            try server.processOne();
 
             // break;
         }
     }
 
     fn runClient(self: *Self) !void {
-        const addr = try self.address();
-        if (self.env.log.level(1)) |w|
-            try w.print("Connecting to {f}\n", .{addr});
-        var stream = try addr.connect(self.env.io, .{ .mode = .stream });
-        defer stream.close(self.env.io);
-
-        var src_dir = try std.fs.openDirAbsolute(self.src orelse return Error.ExpectedSrc, .{});
-        defer src_dir.close();
-
         var session = clnt.Session{
             .env = self.env,
+            .address = try self.address(),
             .base = self.base,
-            .src_dir = src_dir,
+            .src = self.src orelse return Error.ExpectedSrc,
         };
-        session.init(stream);
+        try session.init();
         defer session.deinit();
 
         session.setArgv(self.extra);

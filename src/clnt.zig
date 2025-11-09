@@ -24,18 +24,24 @@ pub const Session = struct {
     const Self = @This();
 
     env: Env,
+    address: std.Io.net.IpAddress,
     base: []const u8,
-    src_dir: std.fs.Dir,
+    src: []const u8,
 
     maybe_cmd: ?[]const u8 = null,
     args: []const []const u8 = &.{},
+    stream: ?std.Io.net.Stream = null,
     cio: comm.Io = undefined,
 
-    pub fn init(self: *Self, stream: std.Io.net.Stream) void {
-        self.cio.init(self.env.io, stream);
+    pub fn init(self: *Self) !void {
+        if (self.env.log.level(1)) |w|
+            try w.print("Connecting to {f}\n", .{self.address});
+        self.stream = try self.address.connect(self.env.io, .{ .mode = .stream });
+        self.cio.init(self.env.io, self.stream.?);
     }
     pub fn deinit(self: *Self) void {
-        _ = self;
+        if (self.stream) |*stream|
+            stream.close(self.env.io);
     }
 
     pub fn setArgv(self: *Self, argv: []const []const u8) void {
@@ -69,8 +75,12 @@ pub const Session = struct {
         {
             var replicate = prot.Replicate.init(self.env.a);
             defer replicate.deinit();
+
+            var src_dir = try std.fs.openDirAbsolute(self.src, .{});
+            defer src_dir.close();
+
             replicate.base = try replicate.a.dupe(u8, self.base);
-            replicate.files = try tree.collectFileStates(self.src_dir, self.env);
+            replicate.files = try tree.collectFileStates(src_dir, self.env);
 
             try self.cio.send(replicate);
         }
