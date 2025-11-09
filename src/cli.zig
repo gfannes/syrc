@@ -1,5 +1,6 @@
 const std = @import("std");
 const rubr = @import("rubr.zig");
+const Env = rubr.Env;
 
 pub const Error = error{
     ExpectedExeName,
@@ -25,8 +26,8 @@ pub const Args = struct {
     const Self = @This();
     pub const Strings = std.ArrayList([]const u8);
 
-    a: std.mem.Allocator,
-    args: rubr.cli.Args,
+    env: Env,
+    args: rubr.cli.Args = undefined,
 
     exe_name: []const u8 = &.{},
     print_help: bool = false,
@@ -37,17 +38,19 @@ pub const Args = struct {
     ip: []const u8 = Default.ip,
     port: u16 = Default.port,
     mode: Mode = Mode.Test,
-    j: usize,
+    j: usize = 0,
     base: []const u8 = Default.base,
     store_path: rubr.fs.Path = .{},
     extra: Strings = .{},
 
-    pub fn init(a: std.mem.Allocator) Self {
-        return Self{ .a = a, .args = rubr.cli.Args.init(a), .j = std.Thread.getCpuCount() catch 0 };
+    pub fn init(self: *Self) void {
+        self.args = rubr.cli.Args{ .env = self.env };
+        if (std.Thread.getCpuCount()) |j|
+            self.j = j
+        else |_| {}
     }
     pub fn deinit(self: *Self) void {
-        self.args.deinit();
-        self.extra.deinit(self.a);
+        self.extra.deinit(self.env.a);
     }
 
     pub fn parse(self: *Self) !void {
@@ -89,7 +92,7 @@ pub const Args = struct {
                 else
                     return Error.ModeFormatError;
             } else {
-                try self.extra.append(self.a, arg.arg);
+                try self.extra.append(self.env.a, arg.arg);
             }
         }
 

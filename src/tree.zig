@@ -1,7 +1,7 @@
 const std = @import("std");
 const crypto = @import("crypto.zig");
 const rubr = @import("rubr.zig");
-const Env = @import("Env.zig");
+const Env = rubr.Env;
 
 pub const Error = error{
     ExpectedName,
@@ -141,7 +141,7 @@ pub fn collectFileStates(dir: std.fs.Dir, env: Env) !FileStates {
         buffer: Buffer = .{},
 
         fn init(dirr: std.fs.Dir, envv: Env) My {
-            return My{ .dir = dirr, .env = envv, .walker = rubr.walker.Walker.init(envv.a, envv.io) };
+            return My{ .dir = dirr, .env = envv, .walker = rubr.walker.Walker{ .env = envv } };
         }
         fn deinit(my: *My) void {
             for (my.file_states.items) |*item|

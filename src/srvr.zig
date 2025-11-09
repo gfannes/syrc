@@ -4,7 +4,7 @@ const std = @import("std");
 const prot = @import("prot.zig");
 const comm = @import("comm.zig");
 const rubr = @import("rubr.zig");
-const Env = @import("Env.zig");
+const Env = rubr.Env;
 
 pub const Error = error{
     ExpectedHello,

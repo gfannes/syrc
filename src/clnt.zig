@@ -5,7 +5,7 @@ const prot = @import("prot.zig");
 const comm = @import("comm.zig");
 const tree = @import("tree.zig");
 const rubr = @import("rubr.zig");
-const Env = @import("Env.zig");
+const Env = rubr.Env;
 
 pub const Error = error{
     ExpectedHello,

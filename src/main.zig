@@ -3,7 +3,7 @@ const app = @import("app.zig");
 const cli = @import("cli.zig");
 const cfg = @import("cfg.zig");
 const rubr = @import("rubr.zig");
-const Env = @import("Env.zig");
+const Env = rubr.Env;
 
 pub fn main() !void {
     const s = rubr.profile.Scope.init(.A);
@@ -13,13 +13,14 @@ pub fn main() !void {
     env_inst.init();
     defer env_inst.deinit();
 
-    const env = env_inst.env();
+    var env = env_inst.env();
 
     var config = cfg.Config.init(env.a);
     defer config.deinit();
     try config.load();
 
-    var cli_args = cli.Args.init(env.a);
+    var cli_args = cli.Args{ .env = env };
+    cli_args.init();
     defer cli_args.deinit();
     try cli_args.parse();
 
@@ -28,10 +29,7 @@ pub fn main() !void {
         return;
     }
 
-    var log = rubr.log.Log{};
-    log.init();
-    defer log.deinit();
-    log.setLevel(cli_args.verbose);
+    env_inst.log.setLevel(cli_args.verbose);
 
     var my_app = app.App.init(
         env,

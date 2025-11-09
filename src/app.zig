@@ -8,7 +8,7 @@ const srvr = @import("srvr.zig");
 const clnt = @import("clnt.zig");
 const cpy = @import("cpy.zig");
 const store = @import("store.zig");
-const Env = @import("Env.zig");
+const Env = rubr.Env;
 
 pub const Error = error{
     ExpectedIp,
