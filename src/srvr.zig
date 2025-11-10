@@ -23,6 +23,8 @@ pub const Error = error{
     VersionMismatch,
     PeerGaveUp,
     IXOutOfBound,
+    OnlyRelativePathAllowed,
+    CouldNotExtractFile,
 };
 
 pub const Server = struct {
@@ -114,7 +116,7 @@ pub const Session = struct {
             if (try self.cio.receive(&replicate)) {
                 prot.printMessage(replicate, self.env.log);
 
-                // Indicate the content that is still missing
+                // Indicate the content that we still miss
                 {
                     var missing = prot.Missing.init(a);
                     defer missing.deinit();
@@ -129,6 +131,7 @@ pub const Session = struct {
                     try self.cio.send(missing);
                 }
 
+                // Place the missing content in the blob.Store
                 {
                     var content = prot.Content.init(a, true);
                     defer content.deinit();
@@ -165,24 +168,68 @@ pub const Session = struct {
     }
 
     fn doReplicate(self: *Self, replicate: prot.Replicate) !void {
-        if (replicate.base.len == 0)
+        const base = replicate.base;
+
+        if (base.len == 0)
             return Error.EmptyBaseFolder;
-
+        if (std.fs.path.isAbsolute(base))
+            return Error.OnlyRelativePathAllowed;
+        if (rubr.fs.isDirectory(base)) {
+            if (self.env.log.level(1)) |w|
+                try w.print("Deleting {s}\n", .{base});
+            std.fs.cwd().deleteTree(base) catch {};
+        }
         if (self.env.log.level(1)) |w|
-            try w.print("Deleting {s}, if present\n", .{replicate.base});
-        std.fs.cwd().deleteTree(replicate.base) catch {};
-
-        if (self.env.log.level(1)) |w|
-            try w.print("Creating base {s}\n", .{replicate.base});
-        const base = try std.fs.cwd().makeOpenPath(replicate.base, .{});
+            try w.print("Creating base {s}\n", .{base});
 
         // Store base dir for prot.Run
         if (self.base != null)
             return Error.BaseAlreadySet;
-        self.base = base;
+
+        const base_dir = try std.fs.cwd().makeOpenPath(base, .{});
+        self.base = base_dir;
+
+        const D = struct {
+            const D = @This();
+
+            base: std.fs.Dir,
+            path: []const u8 = &.{},
+            dir: ?std.fs.Dir = null,
+
+            fn deinit(d: *D) void {
+                d.close();
+            }
+            fn set(d: *D, wanted_path: []const u8) !void {
+                if (std.mem.eql(u8, wanted_path, d.path))
+                    return;
+                d.close();
+                d.path = wanted_path;
+                if (d.path.len > 0)
+                    d.dir = try d.base.makeOpenPath(d.path, .{});
+            }
+            fn get(d: D) std.fs.Dir {
+                return d.dir orelse d.base;
+            }
+            fn close(d: *D) void {
+                if (d.dir) |*dd| {
+                    dd.close();
+                    d.dir = null;
+                    d.path = &.{};
+                }
+            }
+        };
+        var d = D{ .base = base_dir };
+        defer d.deinit();
 
         for (replicate.files.items) |file| {
-            _ = file;
+            const checksum = file.checksum orelse return Error.ExpectedChecksum;
+
+            try d.set(file.path orelse "");
+
+            if (!try self.store.extractFile(checksum, d.get(), file.name)){
+                try self.env.log.err("Could not extract file '{s}'\n",.{file.name});
+                return Error.CouldNotExtractFile;
+            }
         }
     }
 

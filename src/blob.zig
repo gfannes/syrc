@@ -97,13 +97,13 @@ pub const Store = struct {
     // &todo: set attributes as well
     // https://cfengine.com/blog/2024/efficient-data-copying-on-modern-linux/
     // Use sendfile() or copy_file_range()
-    pub fn extractFile(self: *Self, key: Key, filename: []const u8) !bool {
+    pub fn extractFile(self: *Self, key: Key, dir: std.fs.Dir, filename: []const u8) !bool {
         {
-            const dir = self.dir orelse return Error.ExpectedDir;
+            const src_dir = self.dir orelse return Error.ExpectedDir;
 
             const subpath = SubPath.init(key);
 
-            const file = dir.openFile(subpath.all(), .{ .mode = .read_only }) catch return false;
+            const file = src_dir.openFile(subpath.all(), .{ .mode = .read_only }) catch return false;
             defer file.close();
 
             const stat = try file.stat();
@@ -114,10 +114,7 @@ pub const Store = struct {
         }
 
         {
-            const file = if (std.fs.path.isAbsolute(filename))
-                try std.fs.createFileAbsolute(filename, .{})
-            else
-                try std.fs.cwd().createFile(filename, .{});
+            const file = try dir.createFile(filename, .{});
             defer file.close();
 
             try file.writeAll(self.tmp.items);
