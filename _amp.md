@@ -15,7 +15,7 @@
 	- [/] List all files
 		- [x] Basic walking of CWD in [[app.zig]]
 		- [*] Add additional files/folders with `.syrc` files, next to `.ignore` and `.gitignore`
-	- [*] Add attribute info
+	- [x] Add attribute info
 	- [x] Add checksum info
 		- Blake3 at 128bit is secure enough, faster and shorter
 		- [ ] Use a thread pool directly to queue the checksum tasks

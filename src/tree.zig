@@ -81,6 +81,11 @@ pub const FileState = struct {
         var flags: u3 = undefined;
         if (!try tr.readLeaf(&flags, 9, {}))
             return Error.ExpectedFlags;
+        self.attributes = .{
+            .read = flags & (1 << 2) != 0,
+            .write = flags & (1 << 1) != 0,
+            .execute = flags & (1 << 0) != 0,
+        };
 
         if (!try tr.readLeaf(&self.timestamp, 11, {}))
             return Error.ExpectedTimestamp;
@@ -112,6 +117,16 @@ pub const FileState = struct {
         if (self.content) |content|
             node.attr("content_size", content.len);
         node.attr("size", self.size);
+        {
+            var attr: [3]u8 = .{ '-', '-', '-' };
+            if (self.attributes.read)
+                attr[0] = 'r';
+            if (self.attributes.write)
+                attr[1] = 'w';
+            if (self.attributes.execute)
+                attr[2] = 'x';
+            node.attr("attr", &attr);
+        }
         if (self.checksum) |checksum| {
             var buffer: [2 * rubr.util.arrayLenOf(crypto.Checksum)]u8 = undefined;
             for (checksum, 0..) |byte, ix0| {
@@ -182,6 +197,13 @@ pub fn collectFileStates(env: Env, dir: std.fs.Dir) !FileStates {
                     file_state.path = try my.env.a.dupe(u8, path[offsets.base .. offsets.name - 1]);
                 file_state.name = try my.env.a.dupe(u8, path[offsets.name..]);
                 file_state.size = my_size;
+
+                const mode: u16 = @intCast(stat.mode);
+                file_state.attributes = .{
+                    .read = mode & (1 << 8) != 0,
+                    .write = mode & (1 << 7) != 0,
+                    .execute = mode & (1 << 6) != 0,
+                };
 
                 var content: []u8 = &.{};
                 if (my.buffer) |*buf| {

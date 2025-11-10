@@ -1,5 +1,6 @@
 const std = @import("std");
 const crypto = @import("crypto.zig");
+const tree = @import("tree.zig");
 const rubr = @import("rubr.zig");
 
 pub const Error = error{
@@ -97,7 +98,7 @@ pub const Store = struct {
     // &todo: set attributes as well
     // https://cfengine.com/blog/2024/efficient-data-copying-on-modern-linux/
     // Use sendfile() or copy_file_range()
-    pub fn extractFile(self: *Self, key: Key, dir: std.fs.Dir, filename: []const u8) !bool {
+    pub fn extractFile(self: *Self, key: Key, dir: std.fs.Dir, filename: []const u8, attributes: tree.Attributes) !bool {
         {
             const src_dir = self.dir orelse return Error.ExpectedDir;
 
@@ -118,6 +119,15 @@ pub const Store = struct {
             defer file.close();
 
             try file.writeAll(self.tmp.items);
+
+            var mode: std.Io.File.Mode = 0x8024;
+            if (attributes.read)
+                mode |= 1 << 8;
+            if (attributes.write)
+                mode |= 1 << 7;
+            if (attributes.execute)
+                mode |= 1 << 6;
+            try file.chmod(mode);
         }
 
         return true;

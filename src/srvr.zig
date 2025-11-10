@@ -226,8 +226,8 @@ pub const Session = struct {
 
             try d.set(file.path orelse "");
 
-            if (!try self.store.extractFile(checksum, d.get(), file.name)){
-                try self.env.log.err("Could not extract file '{s}'\n",.{file.name});
+            if (!try self.store.extractFile(checksum, d.get(), file.name, file.attributes)) {
+                try self.env.log.err("Could not extract file '{s}'\n", .{file.name});
                 return Error.CouldNotExtractFile;
             }
         }
