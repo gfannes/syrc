@@ -4,16 +4,18 @@
 - [x] Measure/print duration
 - [x] Rework comm to use `std.Io.Reader/Writer` iso generic
 	- Add `flush()` where necessary
-- Copy data from netstream to file
+- Copy data from netstream directly to file iso buffer
 - Create `copy` mode
 	- Create tree state and use this to duplicate the tree
 		- Optional export to file and import from file
-	- [ ] Add additional files/folders with `.syrc` files, next to `.ignore` and `.gitignore`
 	- [ ] Support running commands
+- [!] Fix running in fast mode wrt Error.ExpectedChecksum
+- [*] Support running rake commands in non-git copy of root-all
 - [ ] Create tree state
 	- [/] List all files
 		- [x] Basic walking of CWD in [[app.zig]]
-	- [ ] Add attribute info
+		- [*] Add additional files/folders with `.syrc` files, next to `.ignore` and `.gitignore`
+	- [*] Add attribute info
 	- [x] Add checksum info
 		- Blake3 at 128bit is secure enough, faster and shorter
 		- [ ] Use a thread pool directly to queue the checksum tasks
@@ -22,12 +24,13 @@
 			- Is this faster MT?
 		- Compute checksum
 			- Is this faster MT?
-- [/] Integrate Store into runTest()
+- [*] Support cleanup blob.Store
+- [x] Integrate Store into runTest()
 	- [x] Create in rubr.fs.homeDir()/.config/syrc
 	- [x] Use [32]u8 iso [64]u8 as Key in Store: couple with crypto.Checksum
 	- [x] Implement basic API: check for content, add and extract
 	- [x] Compute missing content when receiving a Replicate command
-	- [*] Support bidirectional comms in runTest()
+	- [x] Support bidirectional comms in runTest()
 		- Use localhost stream
 
 # Modules
