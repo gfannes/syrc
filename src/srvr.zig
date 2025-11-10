@@ -3,6 +3,7 @@
 const std = @import("std");
 const prot = @import("prot.zig");
 const comm = @import("comm.zig");
+const blob = @import("blob.zig");
 const rubr = @import("rubr.zig");
 const Env = rubr.Env;
 
@@ -12,6 +13,7 @@ pub const Error = error{
     ExpectedRun,
     ExpectedBye,
     ExpectedListeningServer,
+    ExpectedChecksum,
     EmptyBaseFolder,
     BaseAlreadySet,
     BaseNotSet,
@@ -25,6 +27,7 @@ pub const Server = struct {
 
     env: Env,
     address: std.Io.net.IpAddress,
+    store: *blob.Store,
     server: ?std.Io.net.Server = null,
 
     pub fn init(self: *Self) !void {
@@ -49,7 +52,10 @@ pub const Server = struct {
         if (self.env.log.level(1)) |w|
             try w.print("Received connection {f}\n", .{connection.socket.address});
 
-        var session = Session{ .env = self.env };
+        var session = Session{
+            .env = self.env,
+            .store = self.store,
+        };
         session.init(connection);
         defer session.deinit();
 
@@ -61,6 +67,7 @@ pub const Session = struct {
     const Self = @This();
 
     env: Env,
+    store: *blob.Store,
     cio: comm.Io = undefined,
     base: ?std.fs.Dir = null,
 
@@ -97,11 +104,28 @@ pub const Session = struct {
         {
             var aa = std.heap.ArenaAllocator.init(self.env.a);
             defer aa.deinit();
+            const a = aa.allocator();
 
-            var replicate = prot.Replicate.init(aa.allocator());
+            var replicate = prot.Replicate.init(a);
 
             if (try self.cio.receive(&replicate)) {
                 prot.printMessage(replicate, self.env.log);
+
+                // Indicate the content that is still missing
+                {
+                    var missing = prot.Missing.init(a);
+                    defer missing.deinit();
+
+                    for (replicate.files.items, 0..) |file, ix0| {
+                        const checksum = file.checksum orelse return Error.ExpectedChecksum;
+                        if (!self.store.hasFile(checksum)) {
+                            try missing.ixs.append(a, ix0);
+                        }
+                    }
+
+                    try self.cio.send(missing);
+                }
+
                 try self.doReplicate(replicate);
             }
         }

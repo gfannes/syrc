@@ -1,8 +1,8 @@
 const std = @import("std");
 
-pub const store = @import("store.zig");
+pub const blob = @import("blob.zig");
 
 test {
     const ut = std.testing;
-    ut.refAllDecls(store);
+    ut.refAllDecls(blob);
 }

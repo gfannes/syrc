@@ -7,7 +7,7 @@ const crypto = @import("crypto.zig");
 const srvr = @import("srvr.zig");
 const clnt = @import("clnt.zig");
 const cpy = @import("cpy.zig");
-const store = @import("store.zig");
+const blob = @import("blob.zig");
 const Env = rubr.Env;
 
 pub const Error = error{
@@ -32,6 +32,8 @@ pub const App = struct {
     store_absdir: []const u8,
     extra: []const []const u8,
 
+    store: ?blob.Store = null,
+
     pub fn init(env: Env, mode: cli.Mode, ip: ?[]const u8, port: ?u16, base: []const u8, src: ?[]const u8, store_absdir: []const u8, extra: []const []const u8) Self {
         return Self{
             .env = env,
@@ -47,6 +49,8 @@ pub const App = struct {
     pub fn deinit(self: *Self) void {
         if (self.server) |*server|
             server.deinit(self.env.io);
+        if (self.store) |*store|
+            store.deinit();
     }
 
     pub fn run(self: *Self) !void {
@@ -115,6 +119,7 @@ pub const App = struct {
         var server = srvr.Server{
             .env = self.env,
             .address = addr,
+            .store = try self.gocStore(),
         };
         defer server.deinit();
         try server.init();
@@ -139,13 +144,13 @@ pub const App = struct {
         var server = srvr.Server{
             .env = self.env,
             .address = try self.address(),
+            .store = try self.gocStore(),
         };
         defer server.deinit();
         try server.init();
 
         while (true) {
             try server.processOne();
-
             // break;
         }
     }
@@ -169,5 +174,12 @@ pub const App = struct {
         const ip = self.ip orelse return Error.ExpectedIp;
         const port = self.port orelse return Error.ExpectedPort;
         return try std.Io.net.IpAddress.resolve(self.env.io, ip, port);
+    }
+
+    fn gocStore(self: *Self) !*blob.Store {
+        if (self.store == null) {
+            self.store = blob.Store.init(self.env.a);
+        }
+        return &self.store.?;
     }
 };

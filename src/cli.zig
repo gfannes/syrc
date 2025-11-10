@@ -17,7 +17,7 @@ const Default = struct {
     const port: u16 = 1357;
     const ip: []const u8 = "0.0.0.0";
     const base: []const u8 = "tmp";
-    const store_dir: []const u8 = ".cache/syrc/store";
+    const store_dir: []const u8 = ".cache/syrc/blob";
 };
 
 pub const Mode = enum { Client, Server, Copy, Broker, Test };
@@ -117,7 +117,7 @@ pub const Args = struct {
         std.debug.print("    -a/--ip          ADDRESS   Ip address [optional, default is {s}]\n", .{Default.ip});
         std.debug.print("    -p/--port        PORT      Port to use [optional, default is {}]\n", .{Default.port});
         std.debug.print("    -m/--mode        MODE      Operation mode: 'client', 'server', 'copy', 'broker' and 'test'\n", .{});
-        std.debug.print("    -s/--store       FOLDER    Folder for file store [optional, default is $HOME/{s}]\n", .{Default.store_dir});
+        std.debug.print("    -s/--store       FOLDER    Folder for blob store [optional, default is $HOME/{s}]\n", .{Default.store_dir});
         std.debug.print("Developed by Geert Fannes.\n", .{});
     }
 };

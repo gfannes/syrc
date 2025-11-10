@@ -9,7 +9,7 @@ pub const Error = error{
     ExpectedRole,
     ExpectedStatus,
     ExpectedFileState,
-    ExpectedFilename,
+    ExpectedIX,
     ExpectedCmd,
     ExpectedArg,
     UnexpectedData,
@@ -115,36 +115,34 @@ pub const Replicate = struct {
 
 pub const Missing = struct {
     const Self = @This();
-    const Filenames = std.ArrayList([]const u8);
+    const IXs = std.ArrayList(usize);
     pub const Id = 6;
 
     a: std.mem.Allocator,
-    filenames: Filenames = .{},
+    ixs: IXs = .{},
 
     pub fn init(a: std.mem.Allocator) Self {
         return Self{ .a = a };
     }
     pub fn deinit(self: *Self) void {
-        for (self.filenames.items) |filename|
-            self.a.free(filename);
-        self.filenames.deinit(self.a);
+        self.ixs.deinit(self.a);
     }
 
     pub fn write(self: Self, parent: *rubr.naft.Node) void {
         var node = parent.node("prot.Missing");
         defer node.deinit();
 
-        for (self.filenames.items) |filename| {
-            var n = node.node("File");
+        for (self.ixs.items) |ix| {
+            var n = node.node("Index");
             defer n.deinit();
-            n.attr("name", filename);
+            n.attr("ix", ix);
         }
     }
 
     pub fn writeComposite(self: Self, tw: anytype) !void {
-        try tw.writeLeaf(self.filenames.items.len, 3);
-        for (self.filenames.items) |filename| {
-            try tw.writeLeaf(filename, 5);
+        try tw.writeLeaf(self.ixs.items.len, 3);
+        for (self.ixs.items) |ix| {
+            try tw.writeLeaf(ix, 5);
         }
     }
     pub fn readComposite(self: *Self, tr: anytype) !void {
@@ -152,13 +150,13 @@ pub const Missing = struct {
         if (!try tr.readLeaf(&size, 3, {}))
             return Error.ExpectedSize;
 
-        var filenames = Filenames{};
-        try filenames.resize(self.a, size);
-        for (filenames.items) |*filename| {
-            if (!try tr.readLeaf(filename, 5, self.a))
-                return Error.ExpectedFilename;
+        var ixs = IXs{};
+        try ixs.resize(self.a, size);
+        for (ixs.items) |*ix| {
+            if (!try tr.readLeaf(ix, 5, {}))
+                return Error.ExpectedIX;
         }
-        self.filenames = filenames;
+        self.ixs = ixs;
     }
 };
 

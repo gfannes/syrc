@@ -127,7 +127,7 @@ pub const Store = struct {
     }
 };
 
-test "store" {
+test "blob.Store" {
     const ut = std.testing;
     const a = ut.allocator;
 

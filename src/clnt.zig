@@ -83,6 +83,12 @@ pub const Session = struct {
             replicate.files = try tree.collectFileStates(src_dir, self.env);
 
             try self.cio.send(replicate);
+
+            var missing = prot.Missing.init(self.env.a);
+
+            if (try self.cio.receive(&missing)) {
+                prot.printMessage(missing, self.env.log);
+            }
         }
 
         if (self.maybe_cmd) |cmd| {
