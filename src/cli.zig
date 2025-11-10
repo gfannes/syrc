@@ -40,7 +40,7 @@ pub const Args = struct {
     mode: Mode = Mode.Test,
     j: usize = 0,
     base: []const u8 = Default.base,
-    store_path: rubr.fs.Path = .{},
+    store_path: []const u8 = Default.store_dir,
     extra: Strings = .{},
 
     pub fn init(self: *Self) void {
@@ -48,9 +48,6 @@ pub const Args = struct {
         if (std.Thread.getCpuCount()) |j|
             self.j = j
         else |_| {}
-    }
-    pub fn deinit(self: *Self) void {
-        self.extra.deinit(self.env.a);
     }
 
     pub fn parse(self: *Self) !void {
@@ -76,7 +73,7 @@ pub const Args = struct {
             } else if (arg.is("-p", "--port")) {
                 self.port = try (self.args.pop() orelse return Error.ExpectedPort).as(u16);
             } else if (arg.is("-s", "--store")) {
-                try self.store_path.set((self.args.pop() orelse return Error.ExpectedFolder).arg);
+                self.store_path = (self.args.pop() orelse return Error.ExpectedFolder).arg;
             } else if (arg.is("-m", "--mode")) {
                 const mode = (self.args.pop() orelse return Error.ExpectedMode);
                 self.mode = if (mode.is("clnt", "client"))
@@ -92,17 +89,17 @@ pub const Args = struct {
                 else
                     return Error.ModeFormatError;
             } else {
-                try self.extra.append(self.env.a, arg.arg);
+                try self.extra.append(self.env.aa, arg.arg);
             }
         }
 
         if (!std.fs.path.isAbsolute(self.src)) {
             self.src = try std.fs.cwd().realpath(self.src, &self.src_buf);
         }
-        if (!std.fs.path.isAbsolute(self.store_path.path())) {
-            var p = try rubr.fs.Path.home();
-            try p.add(self.store_path.path());
-            std.mem.swap(rubr.fs.Path, &self.store_path, &p);
+        if (!std.fs.path.isAbsolute(self.store_path)) {
+            self.store_path = try rubr.fs.homeDirAlloc(self.env.aa, self.store_path);
+            if (self.env.log.level(1)) |w|
+                try w.print("Store will be stored in '{s}'\n", .{self.store_path});
         }
     }
 

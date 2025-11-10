@@ -73,7 +73,7 @@ pub const App = struct {
         var replicate: prot.Replicate = .{
             .a = self.env.a,
             .base = try self.env.a.dupe(u8, "tmp"),
-            .files = try tree.collectFileStates(src_dir, self.env),
+            .files = try tree.collectFileStates(self.env, src_dir),
         };
         defer replicate.deinit();
 
@@ -178,7 +178,10 @@ pub const App = struct {
 
     fn gocStore(self: *Self) !*blob.Store {
         if (self.store == null) {
+            if (self.env.log.level(1)) |w|
+                try w.print("Creating blob store in '{s}'\n", .{self.store_absdir});
             self.store = blob.Store.init(self.env.a);
+            try self.store.?.open(self.store_absdir);
         }
         return &self.store.?;
     }

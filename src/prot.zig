@@ -150,40 +150,60 @@ pub const Missing = struct {
         if (!try tr.readLeaf(&size, 3, {}))
             return Error.ExpectedSize;
 
-        var ixs = IXs{};
-        try ixs.resize(self.a, size);
-        for (ixs.items) |*ix| {
+        try self.ixs.resize(self.a, size);
+        for (self.ixs.items) |*ix| {
             if (!try tr.readLeaf(ix, 5, {}))
                 return Error.ExpectedIX;
         }
-        self.ixs = ixs;
     }
 };
 
 pub const Content = struct {
     const Self = @This();
+    const Data = std.ArrayList([]const u8);
     pub const Id = 8;
 
-    pub fn init() Self {
-        return Self{};
+    a: std.mem.Allocator,
+    owning: bool,
+    data: Data = .{},
+
+    pub fn init(a: std.mem.Allocator, owning: bool) Self {
+        return Self{ .a = a, .owning = owning };
     }
     pub fn deinit(self: *Self) void {
-        _ = self;
+        if (self.owning) {
+            for (self.data.items) |str|
+                self.a.free(str);
+        }
+        self.data.deinit(self.a);
     }
 
     pub fn write(self: Self, parent: *rubr.naft.Node) void {
-        _ = self;
         var node = parent.node("prot.Content");
         defer node.deinit();
+        for (self.data.items) |str| {
+            var n = node.node("Content");
+            defer n.deinit();
+            n.attr("size", str.len);
+        }
     }
 
     pub fn writeComposite(self: Self, tw: anytype) !void {
-        _ = self;
-        _ = tw;
+        try tw.writeLeaf(self.data.items.len, 3);
+        for (self.data.items) |str| {
+            try tw.writeLeaf(str, 5);
+        }
     }
     pub fn readComposite(self: *Self, tr: anytype) !void {
-        _ = self;
-        _ = tr;
+        var size: usize = undefined;
+        if (!try tr.readLeaf(&size, 3, {}))
+            return Error.ExpectedSize;
+
+        try self.data.resize(self.a, size);
+        for (self.data.items) |*str| {
+            if (!try tr.readLeaf(str, 5, self.a))
+                return Error.ExpectedString;
+        }
     }
 };
 

@@ -4,6 +4,7 @@ const std = @import("std");
 const prot = @import("prot.zig");
 const comm = @import("comm.zig");
 const blob = @import("blob.zig");
+const crypto = @import("crypto.zig");
 const rubr = @import("rubr.zig");
 const Env = rubr.Env;
 
@@ -14,12 +15,14 @@ pub const Error = error{
     ExpectedBye,
     ExpectedListeningServer,
     ExpectedChecksum,
+    ExpectedEqualLen,
     EmptyBaseFolder,
     BaseAlreadySet,
     BaseNotSet,
     UnknownId,
     VersionMismatch,
     PeerGaveUp,
+    IXOutOfBound,
 };
 
 pub const Server = struct {
@@ -33,7 +36,7 @@ pub const Server = struct {
     pub fn init(self: *Self) !void {
         if (self.env.log.level(1)) |w|
             try w.print("Creating server on {f}\n", .{self.address});
-        self.server = try self.address.listen(self.env.io, .{});
+        self.server = try self.address.listen(self.env.io, .{ .reuse_address = true });
     }
 
     pub fn deinit(self: *Self) void {
@@ -124,6 +127,19 @@ pub const Session = struct {
                     }
 
                     try self.cio.send(missing);
+                }
+
+                {
+                    var content = prot.Content.init(a, true);
+                    defer content.deinit();
+
+                    if (try self.cio.receive(&content)) {
+                        prot.printMessage(content, self.env.log);
+
+                        for (content.data.items) |str| {
+                            try self.store.addFile(crypto.checksum(str), str);
+                        }
+                    }
                 }
 
                 try self.doReplicate(replicate);

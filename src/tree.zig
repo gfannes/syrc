@@ -20,6 +20,7 @@ pub const FileState = struct {
     path: ?[]const u8 = null,
     name: []const u8 = &.{},
     size: usize = 0,
+    content: ?[]const u8 = null,
     checksum: ?crypto.Checksum = null,
     attributes: Attributes = .{},
     timestamp: Timestamp = 0,
@@ -30,6 +31,8 @@ pub const FileState = struct {
     pub fn deinit(self: *Self) void {
         if (self.path) |path|
             self.a.free(path);
+        if (self.content) |content|
+            self.a.free(content);
         self.a.free(self.name);
     }
 
@@ -106,6 +109,8 @@ pub const FileState = struct {
         if (self.path) |path|
             node.attr("path", path);
         node.attr("name", self.name);
+        if (self.content) |content|
+            node.attr("content_size", content.len);
         node.attr("size", self.size);
         if (self.checksum) |checksum| {
             var buffer: [2 * rubr.util.arrayLenOf(crypto.Checksum)]u8 = undefined;
@@ -128,7 +133,7 @@ pub const Timestamp = u32;
 
 pub const FileStates = std.ArrayList(FileState);
 
-pub fn collectFileStates(dir: std.fs.Dir, env: Env) !FileStates {
+pub fn collectFileStates(env: Env, dir: std.fs.Dir) !FileStates {
     const Collector = struct {
         const My = @This();
         const Buffer = std.ArrayList(u8);
@@ -138,7 +143,8 @@ pub fn collectFileStates(dir: std.fs.Dir, env: Env) !FileStates {
         file_states: FileStates = .{},
         walker: rubr.walker.Walker,
         total_size: u64 = 0,
-        buffer: Buffer = .{},
+        // If buffer is present, it will be used to read-in content iso FileState.content
+        buffer: ?Buffer = null,
 
         fn init(dirr: std.fs.Dir, envv: Env) My {
             return My{ .dir = dirr, .env = envv, .walker = rubr.walker.Walker{ .env = envv } };
@@ -148,7 +154,8 @@ pub fn collectFileStates(dir: std.fs.Dir, env: Env) !FileStates {
                 item.deinit();
             my.file_states.deinit(my.env.a);
             my.walker.deinit();
-            my.buffer.deinit(my.env.a);
+            if (my.buffer) |*buf|
+                buf.deinit(my.env.a);
         }
 
         fn collect(my: *My) !void {
@@ -176,8 +183,15 @@ pub fn collectFileStates(dir: std.fs.Dir, env: Env) !FileStates {
                 file_state.name = try my.env.a.dupe(u8, path[offsets.name..]);
                 file_state.size = my_size;
 
-                try my.buffer.resize(my.env.a, my_size);
-                const content = my.buffer.items;
+                var content: []u8 = &.{};
+                if (my.buffer) |*buf| {
+                    try buf.resize(my.env.a, my_size);
+                    content = buf.items;
+                } else {
+                    content = try file_state.a.alloc(u8, my_size);
+                    file_state.content = content;
+                }
+
                 try r.interface.readSliceAll(content);
                 file_state.checksum = crypto.checksum(content);
 

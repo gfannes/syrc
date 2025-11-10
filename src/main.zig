@@ -21,7 +21,6 @@ pub fn main() !void {
 
     var cli_args = cli.Args{ .env = env };
     cli_args.init();
-    defer cli_args.deinit();
     try cli_args.parse();
 
     if (cli_args.print_help) {
@@ -38,7 +37,7 @@ pub fn main() !void {
         cli_args.port,
         cli_args.base,
         cli_args.src,
-        cli_args.store_path.path(),
+        cli_args.store_path,
         cli_args.extra.items,
     );
     defer my_app.deinit();

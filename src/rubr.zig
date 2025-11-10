@@ -1,4 +1,4 @@
-// Output from `rake export[walker,cli,Log,profile,naft,util,comm,pipe,fs,Env]` from https://github.com/gfannes/rubr from 2025-11-09
+// Output from `rake export[walker,cli,Log,profile,naft,util,comm,pipe,fs,Env]` from https://github.com/gfannes/rubr from 2025-11-10
 
 const std = @import("std");
 
@@ -1643,9 +1643,15 @@ pub const fs = struct {
         }
     };
     
-    pub fn homeDir(a: std.mem.Allocator) ![]u8 {
+    pub fn homeDirAlloc(a: std.mem.Allocator, maybe_part: ?[]const u8) ![]u8 {
         // &todo: Support Windows
-        return try std.process.getEnvVarOwned(a, "HOME");
+        var home_buf: [std.fs.max_path_bytes]u8 = undefined;
+        var fba = std.heap.FixedBufferAllocator.init(&home_buf);
+        const home = try std.process.getEnvVarOwned(fba.allocator(), "HOME");
+        return if (maybe_part) |part|
+            try std.mem.concat(a, u8, &[_][]const u8{ home, "/", part })
+        else
+            try a.dupe(u8, home);
     }
     
     pub fn homePath(part: []const u8, buf: []u8) ![]const u8 {

@@ -13,11 +13,13 @@ pub const Error = error{
     ExpectedRun,
     ExpectedBye,
     ExpectedStatusOk,
+    ExpectedContent,
     EmptyBaseFolder,
     BaseAlreadySet,
     BaseNotSet,
     UnknownId,
     PeerGaveUp,
+    IXOutOfBound,
 };
 
 pub const Session = struct {
@@ -80,14 +82,28 @@ pub const Session = struct {
             defer src_dir.close();
 
             replicate.base = try replicate.a.dupe(u8, self.base);
-            replicate.files = try tree.collectFileStates(src_dir, self.env);
+            replicate.files = try tree.collectFileStates(self.env, src_dir);
 
             try self.cio.send(replicate);
 
             var missing = prot.Missing.init(self.env.a);
+            defer missing.deinit();
 
             if (try self.cio.receive(&missing)) {
                 prot.printMessage(missing, self.env.log);
+
+                var content = prot.Content.init(self.env.a, false);
+                defer content.deinit();
+
+                for (missing.ixs.items) |ix| {
+                    if (ix >= replicate.files.items.len)
+                        return Error.IXOutOfBound;
+                    const file = replicate.files.items[ix];
+                    const str = file.content orelse return Error.ExpectedContent;
+                    try content.data.append(content.a, str);
+                }
+
+                try self.cio.send(content);
             }
         }
 
