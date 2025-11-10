@@ -136,6 +136,8 @@ pub const App = struct {
         defer client.deinit();
         try client.init();
 
+        client.setArgv(self.extra);
+
         var client_thread = try std.Thread.spawn(.{}, clnt.Session.execute, .{&client});
         defer client_thread.join();
     }
