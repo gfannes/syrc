@@ -1,4 +1,4 @@
-// Output from `rake export[walker,cli,Log,profile,naft,util,comm,pipe,fs,Env]` from https://github.com/gfannes/rubr from 2025-11-10
+// Output from `rake export[walker,cli,Log,profile,naft,util,comm,pipe,fs,fmt,Env]` from https://github.com/gfannes/rubr from 2025-11-11
 
 const std = @import("std");
 
@@ -810,18 +810,18 @@ pub const Log = struct {
         return self._io;
     }
     
-    pub fn print(self: Self, comptime fmt: []const u8, args: anytype) !void {
-        try self._io.print(fmt, args);
+    pub fn print(self: Self, comptime fmtstr: []const u8, args: anytype) !void {
+        try self._io.print(fmtstr, args);
         try self._io.flush();
     }
-    pub fn info(self: Self, comptime fmt: []const u8, args: anytype) !void {
-        try self.print("Info: " ++ fmt, args);
+    pub fn info(self: Self, comptime fmtstr: []const u8, args: anytype) !void {
+        try self.print("Info: " ++ fmtstr, args);
     }
-    pub fn warning(self: Self, comptime fmt: []const u8, args: anytype) !void {
-        try self.print("Warning: " ++ fmt, args);
+    pub fn warning(self: Self, comptime fmtstr: []const u8, args: anytype) !void {
+        try self.print("Warning: " ++ fmtstr, args);
     }
-    pub fn err(self: Self, comptime fmt: []const u8, args: anytype) !void {
-        try self.print("Error: " ++ fmt, args);
+    pub fn err(self: Self, comptime fmtstr: []const u8, args: anytype) !void {
+        try self.print("Error: " ++ fmtstr, args);
     }
     
     pub fn level(self: Self, lvl: usize) ?*std.Io.Writer {
@@ -1038,12 +1038,12 @@ pub const naft = struct {
                     self.print("  ", .{});
         }
     
-        fn print(self: Self, comptime fmt: []const u8, args: anytype) void {
+        fn print(self: Self, comptime fmtstr: []const u8, args: anytype) void {
             if (self.io) |io| {
-                io.print(fmt, args) catch {};
+                io.print(fmtstr, args) catch {};
                 io.flush() catch {};
             } else {
-                std.debug.print(fmt, args);
+                std.debug.print(fmtstr, args);
             }
         }
     };
@@ -1690,6 +1690,54 @@ pub const fs = struct {
             try std.fs.deleteTreeAbsolute(path)
         else
             try std.fs.cwd().deleteTree(path);
+    }
+    
+};
+
+// Export from 'src/fmt.zig'
+pub const fmt = struct {
+    pub const Iso = struct {
+        const T = u128;
+    
+        v: T,
+        nano: bool = false,
+    
+        pub fn format(self: @This(), w: *std.Io.Writer) !void {
+            if (self.nano)
+                try self.format_(w, 1_000_000_000_000_000_000, &[_][]const u8{ "G", "M", "k", "_", "m", "u", "n" })
+            else
+                try self.format_(w, 1_000_000_000_000, &[_][]const u8{ "T", "G", "M", "k", "" });
+        }
+        pub fn format_(self: @This(), w: *std.Io.Writer, dd: T, postfixes: []const []const u8) !void {
+            var d = dd;
+    
+            var v = self.v;
+            var first: bool = true;
+            for (postfixes, 0..) |postfix, ix0| {
+                const last = ix0 + 1 == postfixes.len;
+    
+                const n = v / d;
+                const r = v % d;
+    
+                if (n > 0 or !first or last) {
+                    if (first)
+                        try w.print("{}{s}", .{ n, postfix })
+                    else
+                        try w.print("{:0>3}{s}", .{ n, postfix });
+                    first = false;
+                }
+    
+                v = r;
+                d /= 1000;
+            }
+        }
+    };
+    
+    pub fn iso(v: anytype, nano: bool) Iso {
+        return .{
+            .v = @intCast(v),
+            .nano = nano,
+        };
     }
     
 };

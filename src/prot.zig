@@ -376,10 +376,8 @@ pub const Bye = struct {
     }
 };
 
-pub fn printMessage(obj: anytype, log: *const rubr.Log) void {
-    if (log.level(1)) |w| {
-        var node = rubr.naft.Node.init(w);
-        defer node.deinit();
-        obj.write(&node);
-    }
+pub fn printMessage(obj: anytype, w: *std.Io.Writer) void {
+    var node = rubr.naft.Node.init(w);
+    defer node.deinit();
+    obj.write(&node);
 }

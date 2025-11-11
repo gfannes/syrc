@@ -92,7 +92,8 @@ pub const Session = struct {
         {
             var hello: prot.Hello = undefined;
             if (try self.cio.receive2(&hello, &bye)) {
-                prot.printMessage(hello, self.env.log);
+                if (self.env.log.level(1)) |w|
+                    prot.printMessage(hello, w);
                 if (hello.version != prot.My.version) {
                     try bye.setReason("Version mismatch: mine {} !=  peer {}", .{ prot.My.version, hello.version });
                     try self.cio.send(bye);
@@ -100,7 +101,8 @@ pub const Session = struct {
                 }
                 try self.cio.send(prot.Hello{ .role = .Client, .status = .Ok });
             } else {
-                prot.printMessage(bye, self.env.log);
+                if (self.env.log.level(1)) |w|
+                    prot.printMessage(bye, w);
                 return Error.PeerGaveUp;
             }
         }
@@ -114,7 +116,8 @@ pub const Session = struct {
             var replicate = prot.Replicate.init(a);
 
             if (try self.cio.receive(&replicate)) {
-                prot.printMessage(replicate, self.env.log);
+                if (self.env.log.level(2)) |w|
+                    prot.printMessage(replicate, w);
 
                 // Indicate the content that we still miss
                 {
@@ -137,7 +140,8 @@ pub const Session = struct {
                     defer content.deinit();
 
                     if (try self.cio.receive(&content)) {
-                        prot.printMessage(content, self.env.log);
+                        if (self.env.log.level(1)) |w|
+                            prot.printMessage(content, w);
 
                         for (content.data.items) |str| {
                             try self.store.addFile(crypto.checksum(str), str);
@@ -157,14 +161,17 @@ pub const Session = struct {
             var run = prot.Run.init(aa.allocator());
 
             if (try self.cio.receive(&run)) {
-                prot.printMessage(run, self.env.log);
+                if (self.env.log.level(1)) |w|
+                    prot.printMessage(run, w);
                 try self.doRun(run);
             }
         }
 
         // Hangup
-        if (try self.cio.receive(&bye))
-            prot.printMessage(bye, self.env.log);
+        if (try self.cio.receive(&bye)) {
+            if (self.env.log.level(1)) |w|
+                prot.printMessage(bye, w);
+        }
     }
 
     fn doReplicate(self: *Self, replicate: prot.Replicate) !void {
@@ -175,8 +182,10 @@ pub const Session = struct {
         if (std.fs.path.isAbsolute(base))
             return Error.OnlyRelativePathAllowed;
         if (rubr.fs.isDirectory(base)) {
-            if (self.env.log.level(1)) |w|
+            if (self.env.log.level(1)) |w| {
                 try w.print("Deleting {s}\n", .{base});
+                try w.flush();
+            }
             std.fs.cwd().deleteTree(base) catch {};
         }
         if (self.env.log.level(1)) |w|

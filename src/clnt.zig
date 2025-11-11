@@ -62,14 +62,16 @@ pub const Session = struct {
         {
             var hello: prot.Hello = undefined;
             if (try self.cio.receive2(&hello, &bye)) {
-                prot.printMessage(hello, self.env.log);
+                if (self.env.log.level(1)) |w|
+                    prot.printMessage(hello, w);
                 if (hello.status != .Ok) {
                     try bye.setReason("Expected status Ok, not {}", .{hello.status});
                     try self.cio.send(bye);
                     return Error.ExpectedStatusOk;
                 }
             } else {
-                prot.printMessage(bye, self.env.log);
+                if (self.env.log.level(1)) |w|
+                    prot.printMessage(bye, w);
                 return Error.PeerGaveUp;
             }
         }
@@ -83,6 +85,8 @@ pub const Session = struct {
 
             replicate.base = try replicate.a.dupe(u8, self.base);
             replicate.files = try tree.collectFileStates(self.env, src_dir);
+            if (self.env.log.level(2)) |w|
+                prot.printMessage(replicate, w);
 
             try self.cio.send(replicate);
 
@@ -90,7 +94,8 @@ pub const Session = struct {
             defer missing.deinit();
 
             if (try self.cio.receive(&missing)) {
-                prot.printMessage(missing, self.env.log);
+                if (self.env.log.level(1)) |w|
+                    prot.printMessage(missing, w);
 
                 var content = prot.Content.init(self.env.a, false);
                 defer content.deinit();

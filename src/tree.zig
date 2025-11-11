@@ -94,14 +94,14 @@ pub const FileState = struct {
             const header = try tr.readHeader();
             switch (header.id) {
                 13 => {
-                    var checksum: []const u8 = undefined;
-                    if (!try tr.readLeaf(&checksum, header.id, self.a))
+                    var buf: crypto.Checksum = undefined;
+                    var fba = std.heap.FixedBufferAllocator.init(&buf);
+                    var checksum: []const u8 = &.{};
+                    if (!try tr.readLeaf(&checksum, header.id, fba.allocator()))
                         return Error.ExpectedChecksum;
-                    if (checksum.len != @sizeOf(crypto.Checksum))
+                    if (checksum.len != buf.len)
                         return Error.WrongChecksumSize;
-                    self.checksum = undefined;
-                    if (self.checksum) |*cs|
-                        std.mem.copyForwards(u8, cs, checksum);
+                    self.checksum = buf;
                 },
                 else => break,
             }
@@ -174,7 +174,11 @@ pub fn collectFileStates(env: Env, dir: std.fs.Dir) !FileStates {
         }
 
         fn collect(my: *My) !void {
+            const start = try std.time.Instant.now();
             try my.walker.walk(my.dir, my);
+            const stop = try std.time.Instant.now();
+            if (my.env.log.level(1)) |w|
+                try w.print("Read {f}B in {f}s\n", .{ rubr.fmt.iso(my.total_size, false), rubr.fmt.iso(stop.since(start), true) });
         }
 
         pub fn call(my: *My, dirr: std.fs.Dir, path: []const u8, maybe_offsets: ?rubr.walker.Offsets, kind: rubr.walker.Kind) !void {
@@ -187,7 +191,8 @@ pub fn collectFileStates(env: Env, dir: std.fs.Dir) !FileStates {
                 const stat = try file.stat();
                 const my_size = stat.size;
                 my.total_size += my_size;
-                std.debug.print("Path: {s}, my size: {}, total_size: {}\n", .{ path, my_size, my.total_size });
+                if (my.env.log.level(3)) |w|
+                    try w.print("Path: {s}, my size: {}, total_size: {}\n", .{ path, my_size, my.total_size });
 
                 var buffer: [1024]u8 = undefined;
                 var r = file.reader(my.env.io, &buffer);

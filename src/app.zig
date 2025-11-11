@@ -15,7 +15,6 @@ pub const Error = error{
     ExpectedPort,
     ExpectedReplicate,
     ExpectedSrc,
-    ExpectedChecksum,
     NotImplemented,
 };
 
