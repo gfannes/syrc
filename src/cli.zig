@@ -20,7 +20,7 @@ const Default = struct {
     const store_dir: []const u8 = ".cache/syrc/blob";
 };
 
-pub const Mode = enum { Client, Server, Copy, Broker, Test };
+pub const Mode = enum { Client, Server, Check, Copy, Broker, Test };
 
 pub const Args = struct {
     const Self = @This();
@@ -80,6 +80,8 @@ pub const Args = struct {
                     Mode.Client
                 else if (mode.is("srvr", "server"))
                     Mode.Server
+                else if (mode.is("ch", "check"))
+                    Mode.Check
                 else if (mode.is("cp", "copy"))
                     Mode.Copy
                 else if (mode.is("brkr", "broker"))
@@ -113,7 +115,7 @@ pub const Args = struct {
         std.debug.print("    -b/--base        FOLDER    Base folder to use on remote site [optional, default is '{s}']\n", .{Default.base});
         std.debug.print("    -a/--ip          ADDRESS   Ip address [optional, default is {s}]\n", .{Default.ip});
         std.debug.print("    -p/--port        PORT      Port to use [optional, default is {}]\n", .{Default.port});
-        std.debug.print("    -m/--mode        MODE      Operation mode: 'client', 'server', 'copy', 'broker' and 'test'\n", .{});
+        std.debug.print("    -m/--mode        MODE      Operation mode: 'client', 'server', 'check', 'copy', 'broker' and 'test'\n", .{});
         std.debug.print("    -s/--store       FOLDER    Folder for blob store [optional, default is $HOME/{s}]\n", .{Default.store_dir});
         std.debug.print("Developed by Geert Fannes.\n", .{});
     }

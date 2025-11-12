@@ -14,12 +14,16 @@
 - [x] Support running rake commands in non-git copy of root-all
 - [x] Fix failing `rake ut` due to missing `core/vlc/extern/lvgl/conf/lv_conf.h` in copied folder
 	- Reworked existing .gitignore files
-- [*] Export CSV with collected file info to reduce loaded file sizes
-- [*] Print output in client
+- [x] Export CSV with collected file info to reduce loaded file sizes
+- [x] Print output in client
+- [*] Reduce 10GB data that is loaded for root-all
+	- Remove `cli/espcap_ahp/qc/scenario_espcap_v2/auro-440/bianca/FhG_src_drop_renderers_v1.0.0_20180828_0bfbf8ce.zip`
+	- Many `.wav` files
+- [*] Check why `rake ut[core/audio]` fails over syrc
 - [ ] Support for reusing an existing tree without removal
 - Reuse object files by moving the cache outside of core/build/cache/cook
 - [ ] Create tree state
-	- [/] List all files
+	- [x] List all files
 		- [x] Basic walking of CWD in [[app.zig]]
 	- [x] Add attribute info
 	- [ ] Add additional files/folders with `.syrc` files, next to `.ignore` and `.gitignore` that overrule these

@@ -58,6 +58,7 @@ pub const App = struct {
         switch (self.mode) {
             cli.Mode.Client => try self.runClient(),
             cli.Mode.Server => try self.runServer(),
+            cli.Mode.Check => try self.runCheck(),
             cli.Mode.Copy => try self.runCopy(),
             cli.Mode.Test => try self.runTest(),
             cli.Mode.Broker => return Error.NotImplemented,
@@ -169,6 +170,33 @@ pub const App = struct {
         session.setArgv(self.extra);
 
         try session.execute();
+    }
+
+    fn runCheck(self: *Self) !void {
+        const src = self.src orelse return Error.ExpectedSrc;
+
+        var src_dir = try std.fs.openDirAbsolute(src, .{});
+        defer src_dir.close();
+
+        var filestates = try tree.collectFileStates(self.env, src_dir);
+        defer {
+            for (filestates.items) |*filestate|
+                filestate.deinit();
+            filestates.deinit(self.env.a);
+        }
+
+        const file = try std.fs.cwd().createFile("filestates.csv", .{});
+        defer file.close();
+
+        var buf: [1024]u8 = undefined;
+        var writer = file.writer(&buf);
+
+        try writer.interface.print("path\tname\tsize\n", .{});
+        for (filestates.items) |filestate| {
+            try writer.interface.print("{s}\t{s}\t{}\n", .{ filestate.path orelse "", filestate.name, filestate.size });
+        }
+
+        try writer.interface.flush();
     }
 
     fn address(self: Self) !std.Io.net.IpAddress {
