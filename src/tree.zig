@@ -174,11 +174,17 @@ pub fn collectFileStates(env: Env, dir: std.fs.Dir) !FileStates {
         }
 
         fn collect(my: *My) !void {
+            if (my.env.log.level(1)) |w| {
+                try w.print("Reading Tree...\n", .{});
+                try w.flush();
+            }
             const start = try std.time.Instant.now();
             try my.walker.walk(my.dir, my);
             const stop = try std.time.Instant.now();
-            if (my.env.log.level(1)) |w|
+            if (my.env.log.level(1)) |w| {
                 try w.print("Read {f}B in {f}s\n", .{ rubr.fmt.iso(my.total_size, false), rubr.fmt.iso(stop.since(start), true) });
+                try w.flush();
+            }
         }
 
         pub fn call(my: *My, dirr: std.fs.Dir, path: []const u8, maybe_offsets: ?rubr.walker.Offsets, kind: rubr.walker.Kind) !void {

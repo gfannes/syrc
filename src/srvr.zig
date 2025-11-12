@@ -49,8 +49,10 @@ pub const Server = struct {
     pub fn processOne(self: *Self) !void {
         var server = self.server orelse return Error.ExpectedListeningServer;
 
-        if (self.env.log.level(1)) |w|
+        if (self.env.log.level(1)) |w| {
             try w.print("Waiting for connection...\n", .{});
+            try w.flush();
+        }
 
         var connection = try server.accept(self.env.io);
         defer connection.close(self.env.io);
@@ -75,6 +77,10 @@ pub const Session = struct {
     store: *blob.Store,
     cio: comm.Io = undefined,
     base: ?std.fs.Dir = null,
+
+    maybe_stdout: ?std.fs.File = null,
+    maybe_stderr: ?std.fs.File = null,
+    mutex: std.Thread.Mutex = .{},
 
     pub fn init(self: *Self, stream: std.Io.net.Stream) void {
         self.cio.init(self.env.io, stream);
@@ -261,29 +267,60 @@ pub const Session = struct {
 
         try proc.spawn();
 
-        var maybe_stdout = proc.stdout;
-        var maybe_stderr = proc.stderr;
-        while (maybe_stdout != null or maybe_stderr != null) {
-            try processOutput(self.env.io, &maybe_stdout, .stdout);
-            try processOutput(self.env.io, &maybe_stderr, .stderr);
+        {
+            // Reading data from stdout/stderr crossplatform nonblocking seems most easy using MT
+            self.maybe_stdout = proc.stdout;
+            self.maybe_stderr = proc.stderr;
+            var thread_stdout = try std.Thread.spawn(.{}, processOutputStdout, .{self});
+            defer thread_stdout.join();
+            var thread_stderr = try std.Thread.spawn(.{}, processOutputStderr, .{self});
+            defer thread_stderr.join();
         }
 
-        // &todo: Provide exit code to Client
         const term = try proc.wait();
-        std.debug.print("term: {}\n", .{term});
+        if (self.env.log.level(1)) |w|
+            try w.print("term: {}\n", .{term});
+
+        var done = prot.Done{};
+        switch (term) {
+            .Exited => |v| done.exit = v,
+            .Signal => |v| done.signal = v,
+            .Stopped => |v| done.stop = v,
+            .Unknown => |v| done.unknown = v,
+        }
+        try self.cio.send(done);
     }
 
     const OutputKind = enum { stdout, stderr };
-    fn processOutput(io: std.Io, maybe_output: *?std.fs.File, kind: OutputKind) !void {
+    fn processOutputStdout(self: *Self) !void {
+        try self.processOutput_(&self.maybe_stdout, .stdout);
+    }
+    fn processOutputStderr(self: *Self) !void {
+        try self.processOutput_(&self.maybe_stderr, .stderr);
+    }
+    fn processOutput_(self: *Self, maybe_output: *?std.fs.File, kind: OutputKind) !void {
         var buf: [1024]u8 = undefined;
         if (maybe_output.*) |output| {
             var b: [1024]u8 = undefined;
-            var reader = output.reader(io, &b);
+            var reader = output.reader(self.env.io, &b);
             while (true) {
                 const n = try reader.interface.readSliceShort(&buf);
                 if (n > 0) {
-                    // &todo: Provide output to Client
-                    std.debug.print("output: {} {}=>({s})\n", .{ kind, n, buf[0..n] });
+                    if (self.env.log.level(1)) |w|
+                        try w.print("output: {} {}=>({s})\n", .{ kind, n, buf[0..n] });
+
+                    var outp = prot.Output.init(self.env.a);
+                    defer outp.deinit();
+                    switch (kind) {
+                        .stdout => outp.stdout = try outp.a.dupe(u8, buf[0..n]),
+                        .stderr => outp.stderr = try outp.a.dupe(u8, buf[0..n]),
+                    }
+
+                    {
+                        self.mutex.lock();
+                        defer self.mutex.unlock();
+                        try self.cio.send(outp);
+                    }
                 }
                 if (n < buf.len) {
                     // End of file

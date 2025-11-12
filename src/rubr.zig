@@ -724,7 +724,7 @@ pub const Log = struct {
     };
     
     _do_close: bool = false,
-    _file: std.fs.File = undefined,
+    _file: std.fs.File = std.fs.File.stdout(),
     
     _buffer: [1024]u8 = undefined,
     _writer: std.fs.File.Writer = undefined,
@@ -736,7 +736,6 @@ pub const Log = struct {
     _autoclean: ?Autoclean = null,
     
     pub fn init(self: *Self) void {
-        self._file = std.fs.File.stdout();
         self.initWriter();
     }
     pub fn deinit(self: *Self) void {
@@ -1156,6 +1155,8 @@ pub const comm = struct {
                 try self.writeLeaf(String{ .str = obj }, id);
             } else if (comptime util.isUIntType(T)) |_| {
                 try self.writeLeaf(UInt{ .u = obj }, id);
+            } else if (comptime util.isIntType(T)) |_| {
+                try self.writeLeaf(Int{ .i = obj }, id);
             } else {
                 var counter = Counter{};
                 try obj.writeLeaf(&counter.interface);
@@ -1201,6 +1202,11 @@ pub const comm = struct {
                 var uint = UInt{};
                 const ret = try self.readLeaf(&uint, id, ctx);
                 obj.* = std.math.cast(T, uint.u) orelse return Error.TooLarge;
+                return ret;
+            } else if (comptime util.isIntType(T)) |_| {
+                var int = Int{};
+                const ret = try self.readLeaf(&int, id, ctx);
+                obj.* = std.math.cast(T, int.i) orelse return Error.TooLarge;
                 return ret;
             } else {
                 const header = try self.readHeader();
@@ -1270,7 +1276,7 @@ pub const comm = struct {
     pub fn writeUInt(u: anytype, io: *std.Io.Writer) !void {
         const T = @TypeOf(u);
         const len = (@bitSizeOf(T) - @clz(u) + 7) / 8;
-        var buffer: [8]u8 = undefined;
+        var buffer: [@sizeOf(u128)]u8 = undefined;
         var uu: u128 = u;
         for (0..len) |ix| {
             buffer[len - ix - 1] = @truncate(uu);
@@ -1290,6 +1296,38 @@ pub const comm = struct {
             u |= @as(T, byte);
         }
         return u;
+    }
+    
+    pub fn writeInt(i: anytype, io: *std.Io.Writer) !void {
+        const ii: i128 = @intCast(i);
+        var uu: u128 = @bitCast(ii);
+    
+        const cl = if (ii >= 0) @clz(uu) else @clz(~uu);
+        const len = (@bitSizeOf(u128) - cl) / 8 + 1;
+    
+        var buffer: [@sizeOf(u128)]u8 = undefined;
+        for (0..len) |ix| {
+            buffer[len - ix - 1] = @truncate(uu);
+            uu >>= 8;
+        }
+        try io.writeAll(buffer[0..len]);
+    }
+    pub fn readInt(T: type, size: usize, io: *std.Io.Reader) !T {
+        if (size > @bitSizeOf(u128))
+            return Error.TooLarge;
+        var buffer: [@sizeOf(u128)]u8 = undefined;
+        const slice = buffer[0..size];
+        try io.readSliceAll(slice);
+        var u: u128 = 0;
+        if (slice.len > 0 and slice[0] >= 128)
+            // Sign extension for two's complement
+            u = ~u;
+        for (slice) |byte| {
+            u <<= 8;
+            u |= @as(u128, byte);
+        }
+        const i: i128 = @bitCast(u);
+        return @intCast(i);
     }
     
     pub fn writeVLC(u: anytype, io: *std.Io.Writer) !void {
@@ -1372,6 +1410,16 @@ pub const comm = struct {
         }
         fn readLeaf(self: *Self, size: usize, io: *std.Io.Reader, _: void) !void {
             self.u = try readUInt(@TypeOf(self.u), size, io);
+        }
+    };
+    const Int = struct {
+        const Self = @This();
+        i: i128 = 0,
+        fn writeLeaf(self: Self, io: *std.Io.Writer) !void {
+            try writeInt(self.i, io);
+        }
+        fn readLeaf(self: *Self, size: usize, io: *std.Io.Reader, _: void) !void {
+            self.i = try readInt(@TypeOf(self.i), size, io);
         }
     };
     

@@ -108,6 +108,8 @@ pub const Session = struct {
                     try content.data.append(content.a, str);
                 }
 
+                if (self.env.log.level(1)) |w|
+                    prot.printMessage(content, w);
                 try self.cio.send(content);
             }
         }
@@ -120,6 +122,20 @@ pub const Session = struct {
                 try run.args.append(self.env.a, try run.a.dupe(u8, arg));
 
             try self.cio.send(run);
+
+            while (true) {
+                var output = prot.Output.init(self.env.a);
+                defer output.deinit();
+                var done = prot.Done{};
+                if (try self.cio.receive2(&output, &done)) {
+                    if (self.env.log.level(1)) |w|
+                        prot.printMessage(output, w);
+                } else {
+                    if (self.env.log.level(1)) |w|
+                        prot.printMessage(done, w);
+                    break;
+                }
+            }
         }
 
         try self.cio.send(bye);

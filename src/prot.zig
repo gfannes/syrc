@@ -12,6 +12,8 @@ pub const Error = error{
     ExpectedIX,
     ExpectedCmd,
     ExpectedArg,
+    ExpectedFd,
+    ExpectedRc,
     UnexpectedData,
     ReasonAlreadySet,
 };
@@ -207,33 +209,6 @@ pub const Content = struct {
     }
 };
 
-pub const Ready = struct {
-    const Self = @This();
-    pub const Id = 10;
-
-    pub fn init() Self {
-        return Self{};
-    }
-    pub fn deinit(self: *Self) void {
-        _ = self;
-    }
-
-    pub fn write(self: Self, parent: *rubr.naft.Node) void {
-        _ = self;
-        var node = parent.node("prot.Ready");
-        defer node.deinit();
-    }
-
-    pub fn writeComposite(self: Self, tw: anytype) !void {
-        _ = self;
-        _ = tw;
-    }
-    pub fn readComposite(self: *Self, tr: anytype) !void {
-        _ = self;
-        _ = tr;
-    }
-};
-
 pub const Run = struct {
     const Self = @This();
     pub const Id = 12;
@@ -287,26 +262,41 @@ pub const Output = struct {
     const Self = @This();
     pub const Id = 14;
 
-    pub fn init() Self {
-        return Self{};
+    a: std.mem.Allocator,
+    stdout: ?[]const u8 = null,
+    stderr: ?[]const u8 = null,
+
+    pub fn init(a: std.mem.Allocator) Self {
+        return Self{ .a = a };
     }
     pub fn deinit(self: *Self) void {
-        _ = self;
+        if (self.stdout) |str|
+            self.a.free(str);
+        if (self.stderr) |str|
+            self.a.free(str);
     }
 
     pub fn write(self: Self, parent: *rubr.naft.Node) void {
-        _ = self;
         var node = parent.node("prot.Output");
         defer node.deinit();
+        if (self.stdout) |str|
+            node.attr("stdout", str);
+        if (self.stderr) |str|
+            node.attr("stderr", str);
     }
 
     pub fn writeComposite(self: Self, tw: anytype) !void {
-        _ = self;
-        _ = tw;
+        if (self.stdout) |str|
+            try tw.writeLeaf(str, 3);
+        if (self.stderr) |str|
+            try tw.writeLeaf(str, 5);
     }
     pub fn readComposite(self: *Self, tr: anytype) !void {
-        _ = self;
-        _ = tr;
+        var str: []const u8 = undefined;
+        if (try tr.readLeaf(&str, 3, self.a))
+            self.stdout = str;
+        if (try tr.readLeaf(&str, 5, self.a))
+            self.stderr = str;
     }
 };
 
@@ -314,6 +304,11 @@ pub const Done = struct {
     const Self = @This();
     pub const Id = 16;
 
+    exit: ?u32 = null,
+    signal: ?u32 = null,
+    stop: ?u32 = null,
+    unknown: ?u32 = null,
+
     pub fn init() Self {
         return Self{};
     }
@@ -322,18 +317,38 @@ pub const Done = struct {
     }
 
     pub fn write(self: Self, parent: *rubr.naft.Node) void {
-        _ = self;
         var node = parent.node("prot.Done");
         defer node.deinit();
+        if (self.exit) |exit|
+            node.attr("exit", exit);
+        if (self.signal) |signal|
+            node.attr("signal", signal);
+        if (self.stop) |stop|
+            node.attr("stop", stop);
+        if (self.unknown) |unknown|
+            node.attr("unknown", unknown);
     }
 
     pub fn writeComposite(self: Self, tw: anytype) !void {
-        _ = self;
-        _ = tw;
+        if (self.exit) |exit|
+            try tw.writeLeaf(exit, 3);
+        if (self.signal) |signal|
+            try tw.writeLeaf(signal, 5);
+        if (self.stop) |stop|
+            try tw.writeLeaf(stop, 7);
+        if (self.unknown) |unknown|
+            try tw.writeLeaf(unknown, 9);
     }
     pub fn readComposite(self: *Self, tr: anytype) !void {
-        _ = self;
-        _ = tr;
+        var tmp: u32 = undefined;
+        if (try tr.readLeaf(&tmp, 3, {}))
+            self.exit = tmp;
+        if (try tr.readLeaf(&tmp, 5, {}))
+            self.signal = tmp;
+        if (try tr.readLeaf(&tmp, 7, {}))
+            self.stop = tmp;
+        if (try tr.readLeaf(&tmp, 9, {}))
+            self.unknown = tmp;
     }
 };
 

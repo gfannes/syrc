@@ -1,6 +1,6 @@
 require('fileutils')
 
-here_dir = File.dirname(__FILE__)
+File.dirname(__FILE__)
 gubg_dir = ENV['gubg']
 gubg_bin_dir = File.join(gubg_dir, 'bin')
 
@@ -14,7 +14,7 @@ task :install do
     mode = :fast
     # mode = :debug
 
-    m = {safe: :safe, fast: :fast}[mode]
+    m = { safe: :safe, fast: :fast }[mode]
     mode_str = m ? "--release=#{m}" : ''
     sh('clear')
     sh("zig build install #{mode_str} --prefix-exe-dir #{gubg_bin_dir} -freference-trace=10")
