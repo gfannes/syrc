@@ -12,14 +12,17 @@
 - [x] Fix running in fast mode wrt Error.ExpectedChecksum
 	- Issue was incorrect setup of `?[32]u8`
 - [x] Support running rake commands in non-git copy of root-all
-- [*] Fix failing `rake ut` due to missing `core/vlc/extern/lvgl/conf/lv_conf.h` in copied folder
-	- [ ] Add additional files/folders with `.syrc` files, next to `.ignore` and `.gitignore` that overrule these
-- [ ] Export CSV with collected file info to reduce loaded file sizes
+- [x] Fix failing `rake ut` due to missing `core/vlc/extern/lvgl/conf/lv_conf.h` in copied folder
+	- Reworked existing .gitignore files
+- [*] Export CSV with collected file info to reduce loaded file sizes
+- [*] Print output in client
+- [ ] Support for reusing an existing tree without removal
 - Reuse object files by moving the cache outside of core/build/cache/cook
 - [ ] Create tree state
 	- [/] List all files
 		- [x] Basic walking of CWD in [[app.zig]]
 	- [x] Add attribute info
+	- [ ] Add additional files/folders with `.syrc` files, next to `.ignore` and `.gitignore` that overrule these
 	- [x] Add checksum info
 		- Blake3 at 128bit is secure enough, faster and shorter
 		- [ ] Use a thread pool directly to queue the checksum tasks
