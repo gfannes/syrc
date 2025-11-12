@@ -1,4 +1,4 @@
-// Output from `rake export[walker,cli,Log,profile,naft,util,comm,pipe,fs,fmt,Env]` from https://github.com/gfannes/rubr from 2025-11-11
+// Output from `rake export[walker,cli,Log,profile,naft,util,comm,pipe,fs,fmt,Env]` from https://github.com/gfannes/rubr from 2025-11-12
 
 const std = @import("std");
 
@@ -724,7 +724,7 @@ pub const Log = struct {
     };
     
     _do_close: bool = false,
-    _file: std.fs.File = std.fs.File.stdout(),
+    _file: std.fs.File = undefined,
     
     _buffer: [1024]u8 = undefined,
     _writer: std.fs.File.Writer = undefined,
@@ -736,6 +736,7 @@ pub const Log = struct {
     _autoclean: ?Autoclean = null,
     
     pub fn init(self: *Self) void {
+        self._file = std.fs.File.stdout();
         self.initWriter();
     }
     pub fn deinit(self: *Self) void {
