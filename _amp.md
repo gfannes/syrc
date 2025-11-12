@@ -19,7 +19,8 @@
 - [*] Reduce 10GB data that is loaded for root-all
 	- Remove `cli/espcap_ahp/qc/scenario_espcap_v2/auro-440/bianca/FhG_src_drop_renderers_v1.0.0_20180828_0bfbf8ce.zip`
 	- Many `.wav` files
-- [*] Check why `rake ut[core/audio]` fails over syrc
+- [*] Fix `rake ut[core/audio]` over syrc
+	- Due to missing `sine440.wav`
 - [ ] Support for reusing an existing tree without removal
 - Reuse object files by moving the cache outside of core/build/cache/cook
 - [ ] Create tree state
