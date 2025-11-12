@@ -1,4 +1,5 @@
 const std = @import("std");
+const builtin = @import("builtin");
 const crypto = @import("crypto.zig");
 const tree = @import("tree.zig");
 const rubr = @import("rubr.zig");
@@ -127,7 +128,8 @@ pub const Store = struct {
                 mode |= 1 << 7;
             if (attributes.execute)
                 mode |= 1 << 6;
-            try file.chmod(mode);
+            if (builtin.os.tag != .windows)
+                try file.chmod(mode);
         }
 
         return true;
