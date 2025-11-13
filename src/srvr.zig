@@ -276,7 +276,7 @@ pub const Session = struct {
 
             if (self.env.log.level(1)) |w| {
                 if (ix0 % 1000 == 0) {
-                    try w.print("\t{s}/{s}\n", .{ path, file.name });
+                    try w.print("\t{}\t{s}/{s}\n", .{ ix0, path, file.name });
                     try w.flush();
                 }
             }
