@@ -88,11 +88,19 @@ pub const Session = struct {
             if (self.env.log.level(2)) |w|
                 prot.printMessage(replicate, w);
 
+            if (self.env.log.level(1)) |w| {
+                try w.print("Sending Replicate...\n", .{});
+                try w.flush();
+            }
             try self.cio.send(replicate);
 
             var missing = prot.Missing.init(self.env.a);
             defer missing.deinit();
 
+            if (self.env.log.level(1)) |w| {
+                try w.print("Receiving Missing...\n", .{});
+                try w.flush();
+            }
             if (try self.cio.receive(&missing)) {
                 if (self.env.log.level(1)) |w|
                     prot.printMessage(missing, w);
