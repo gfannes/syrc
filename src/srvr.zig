@@ -282,6 +282,8 @@ pub const Session = struct {
             var do_extract: bool = true;
             if (!replicate.reset) {
                 if (d.get().openFile(file.name, .{ .mode = .read_only })) |f| {
+                    defer f.close();
+
                     const stat = try f.stat();
                     try tmp.resize(self.env.a, stat.size);
                     const readcount = try f.read(tmp.items);
