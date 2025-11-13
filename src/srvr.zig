@@ -270,13 +270,15 @@ pub const Session = struct {
             try w.print("Reconstructing the Tree...\n", .{});
             try w.flush();
         }
-        for (replicate.files.items) |file| {
+        for (replicate.files.items, 0..) |file, ix0| {
             const checksum = file.checksum orelse return Error.ExpectedChecksum;
             const path = file.path orelse "";
 
             if (self.env.log.level(1)) |w| {
-                try w.print("\t{s}/{s}\n", .{ path, file.name });
-                try w.flush();
+                if (ix0 % 1000 == 0) {
+                    try w.print("\t{s}/{s}\n", .{ path, file.name });
+                    try w.flush();
+                }
             }
 
             try d.set(path);
