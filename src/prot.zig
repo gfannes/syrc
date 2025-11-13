@@ -66,6 +66,8 @@ pub const Replicate = struct {
 
     a: std.mem.Allocator,
     base: []const u8 = &.{},
+    reset: bool = false,
+    cleanup: bool = false,
     files: tree.FileStates = .{},
 
     pub fn init(a: std.mem.Allocator) Self {
@@ -82,13 +84,17 @@ pub const Replicate = struct {
         var node = parent.node("prot.Replicate");
         defer node.deinit();
         node.attr("base", self.base);
+        node.attr("reset", self.reset);
+        node.attr("cleanup", self.cleanup);
         for (self.files.items) |item|
             item.write(&node);
     }
 
     pub fn writeComposite(self: Self, tw: anytype) !void {
         try tw.writeLeaf(self.base, 3);
-        try tw.writeLeaf(self.files.items.len, 3);
+        try tw.writeLeaf(self.reset, 5);
+        try tw.writeLeaf(self.cleanup, 7);
+        try tw.writeLeaf(self.files.items.len, 9);
         for (self.files.items) |file| {
             try tw.writeComposite(file, 2);
         }
@@ -97,8 +103,14 @@ pub const Replicate = struct {
         if (!try tr.readLeaf(&self.base, 3, self.a))
             return Error.ExpectedString;
 
+        if (!try tr.readLeaf(&self.reset, 5, {}))
+            return Error.ExpectedString;
+
+        if (!try tr.readLeaf(&self.cleanup, 7, {}))
+            return Error.ExpectedString;
+
         var size: usize = undefined;
-        if (!try tr.readLeaf(&size, 3, {}))
+        if (!try tr.readLeaf(&size, 9, {}))
             return Error.ExpectedSize;
 
         var files = tree.FileStates{};

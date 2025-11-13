@@ -40,6 +40,8 @@ pub const Args = struct {
     mode: Mode = Mode.Test,
     j: usize = 0,
     base: []const u8 = Default.base,
+    reset: bool = false,
+    cleanup: bool = false,
     store_path: []const u8 = Default.store_dir,
     extra: Strings = .{},
 
@@ -68,6 +70,10 @@ pub const Args = struct {
                 self.dst = (self.args.pop() orelse return Error.ExpectedDestination).arg;
             } else if (arg.is("-b", "--base")) {
                 self.base = (self.args.pop() orelse return Error.ExpectedFolder).arg;
+            } else if (arg.is("-r", "--reset")) {
+                self.reset = true;
+            } else if (arg.is("-c", "--cleanup")) {
+                self.cleanup = true;
             } else if (arg.is("-a", "--ip")) {
                 self.ip = (self.args.pop() orelse return Error.ExpectedIp).arg;
             } else if (arg.is("-p", "--port")) {
@@ -113,6 +119,8 @@ pub const Args = struct {
         std.debug.print("    -s/--src         FOLDER    Source folder to synchronize\n", .{});
         std.debug.print("    -d/--dst         DEST      Remote destination\n", .{});
         std.debug.print("    -b/--base        FOLDER    Base folder to use on remote site [optional, default is '{s}']\n", .{Default.base});
+        std.debug.print("    -r/--reset                 Force a reset of the base destination folder [optional, default is 'no']\n", .{});
+        std.debug.print("    -c/--cleanup               Cleanup the base destination folder after use [optional, default is 'no']\n", .{});
         std.debug.print("    -a/--ip          ADDRESS   Ip address [optional, default is {s}]\n", .{Default.ip});
         std.debug.print("    -p/--port        PORT      Port to use [optional, default is {}]\n", .{Default.port});
         std.debug.print("    -m/--mode        MODE      Operation mode: 'client', 'server', 'check', 'copy', 'broker' and 'test'\n", .{});

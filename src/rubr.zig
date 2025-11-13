@@ -1081,6 +1081,13 @@ pub const util = struct {
         };
     }
     
+    pub fn isBoolType(T: type) bool {
+        return switch (@typeInfo(T)) {
+            .bool => true,
+            else => false,
+        };
+    }
+    
     pub fn isStringType(T: type) bool {
         const BaseT = baseType(T);
         if (BaseT != u8)
@@ -1158,6 +1165,8 @@ pub const comm = struct {
                 try self.writeLeaf(UInt{ .u = obj }, id);
             } else if (comptime util.isIntType(T)) |_| {
                 try self.writeLeaf(Int{ .i = obj }, id);
+            } else if (comptime util.isBoolType(T)) {
+                try self.writeLeaf(Bool{ .b = obj }, id);
             } else {
                 var counter = Counter{};
                 try obj.writeLeaf(&counter.interface);
@@ -1208,6 +1217,11 @@ pub const comm = struct {
                 var int = Int{};
                 const ret = try self.readLeaf(&int, id, ctx);
                 obj.* = std.math.cast(T, int.i) orelse return Error.TooLarge;
+                return ret;
+            } else if (comptime util.isBoolType(T)) {
+                var b = Bool{};
+                const ret = try self.readLeaf(&b, id, ctx);
+                obj.* = b.b;
                 return ret;
             } else {
                 const header = try self.readHeader();
@@ -1293,7 +1307,8 @@ pub const comm = struct {
         try io.readSliceAll(slice);
         var u: T = 0;
         for (slice) |byte| {
-            u <<= 8;
+            if (@sizeOf(T) > 1)
+                u <<= 8;
             u |= @as(T, byte);
         }
         return u;
@@ -1421,6 +1436,18 @@ pub const comm = struct {
         }
         fn readLeaf(self: *Self, size: usize, io: *std.Io.Reader, _: void) !void {
             self.i = try readInt(@TypeOf(self.i), size, io);
+        }
+    };
+    const Bool = struct {
+        const Self = @This();
+        b: bool = false,
+        fn writeLeaf(self: Self, io: *std.Io.Writer) !void {
+            const u: u8 = if (self.b) 1 else 0;
+            try writeUInt(u, io);
+        }
+        fn readLeaf(self: *Self, size: usize, io: *std.Io.Reader, _: void) !void {
+            const u = try readUInt(u8, size, io);
+            self.b = if (u == 0) false else true;
         }
     };
     

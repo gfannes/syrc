@@ -28,6 +28,8 @@ pub const Session = struct {
     env: Env,
     address: std.Io.net.IpAddress,
     base: []const u8,
+    reset: bool,
+    cleanup: bool,
     src: []const u8,
 
     maybe_cmd: ?[]const u8 = null,
@@ -84,6 +86,8 @@ pub const Session = struct {
             defer src_dir.close();
 
             replicate.base = try replicate.a.dupe(u8, self.base);
+            replicate.reset = self.reset;
+            replicate.cleanup = self.cleanup;
             replicate.files = try tree.collectFileStates(self.env, src_dir);
             if (self.env.log.level(2)) |w|
                 prot.printMessage(replicate, w);

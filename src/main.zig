@@ -36,6 +36,8 @@ pub fn main() !void {
         cli_args.ip,
         cli_args.port,
         cli_args.base,
+        cli_args.reset,
+        cli_args.cleanup,
         cli_args.src,
         cli_args.store_path,
         cli_args.extra.items,

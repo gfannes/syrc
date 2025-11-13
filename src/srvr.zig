@@ -217,7 +217,7 @@ pub const Session = struct {
             return Error.EmptyBaseFolder;
         if (std.fs.path.isAbsolute(base))
             return Error.OnlyRelativePathAllowed;
-        if (rubr.fs.isDirectory(base)) {
+        if (replicate.reset and rubr.fs.isDirectory(base)) {
             if (self.env.log.level(1)) |w| {
                 try w.print("Deleting {s}\n", .{base});
                 try w.flush();
@@ -270,22 +270,44 @@ pub const Session = struct {
             try w.print("Reconstructing the Tree...\n", .{});
             try w.flush();
         }
-        for (replicate.files.items, 0..) |file, ix0| {
+        var tmp = std.ArrayList(u8){};
+        defer tmp.deinit(self.env.a);
+        var extract_count: u64 = 0;
+        for (replicate.files.items) |file| {
             const checksum = file.checksum orelse return Error.ExpectedChecksum;
             const path = file.path orelse "";
 
-            if (self.env.log.level(1)) |w| {
-                if (ix0 % 1000 == 0) {
-                    try w.print("\t{}\t{s}/{s}\n", .{ ix0, path, file.name });
-                    try w.flush();
+            try d.set(path);
+
+            var do_extract: bool = true;
+            if (!replicate.reset) {
+                if (d.get().openFile(file.name, .{ .mode = .read_only })) |f| {
+                    const stat = try f.stat();
+                    try tmp.resize(self.env.a, stat.size);
+                    const readcount = try f.read(tmp.items);
+                    if (readcount == stat.size) {
+                        const cs = crypto.checksum(tmp.items);
+                        if (std.mem.eql(u8, &cs, &checksum))
+                            do_extract = false;
+                    }
+                } else |_| {
+                    if (self.env.log.level(1)) |w|
+                        try w.print("\tCould not find {s}\n", .{file.name});
                 }
             }
 
-            try d.set(path);
-
-            if (!try self.store.extractFile(checksum, d.get(), file.name, file.attributes)) {
-                try self.env.log.err("Could not extract file '{s}'\n", .{file.name});
-                return Error.CouldNotExtractFile;
+            if (do_extract) {
+                if (self.env.log.level(1)) |w| {
+                    if (extract_count % 1000 == 0) {
+                        try w.print("\tExtracting {}\t{s}/{s}\n", .{ extract_count, path, file.name });
+                        try w.flush();
+                    }
+                    extract_count += 1;
+                }
+                if (!try self.store.extractFile(checksum, d.get(), file.name, file.attributes)) {
+                    try self.env.log.err("Could not extract file '{s}'\n", .{file.name});
+                    return Error.CouldNotExtractFile;
+                }
             }
         }
         if (self.env.log.level(1)) |w| {

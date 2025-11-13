@@ -27,19 +27,23 @@ pub const App = struct {
     port: ?u16 = null,
     server: ?std.Io.net.Server = null,
     base: []const u8,
+    reset: bool,
+    cleanup: bool,
     src: ?[]const u8,
     store_absdir: []const u8,
     extra: []const []const u8,
 
     store: ?blob.Store = null,
 
-    pub fn init(env: Env, mode: cli.Mode, ip: ?[]const u8, port: ?u16, base: []const u8, src: ?[]const u8, store_absdir: []const u8, extra: []const []const u8) Self {
+    pub fn init(env: Env, mode: cli.Mode, ip: ?[]const u8, port: ?u16, base: []const u8, reset: bool, cleanup: bool, src: ?[]const u8, store_absdir: []const u8, extra: []const []const u8) Self {
         return Self{
             .env = env,
             .mode = mode,
             .ip = ip,
             .port = port,
             .base = base,
+            .reset = reset,
+            .cleanup = cleanup,
             .src = src,
             .store_absdir = store_absdir,
             .extra = extra,
@@ -131,6 +135,8 @@ pub const App = struct {
             .env = self.env,
             .address = addr,
             .base = self.base,
+            .reset = self.reset,
+            .cleanup = self.cleanup,
             .src = self.src orelse return Error.ExpectedSrc,
         };
         defer client.deinit();
@@ -162,6 +168,8 @@ pub const App = struct {
             .env = self.env,
             .address = try self.address(),
             .base = self.base,
+            .reset = self.reset,
+            .cleanup = self.cleanup,
             .src = self.src orelse return Error.ExpectedSrc,
         };
         try session.init();
