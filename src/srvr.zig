@@ -121,22 +121,40 @@ pub const Session = struct {
 
             var replicate = prot.Replicate.init(a);
 
+            if (self.env.log.level(1)) |w| {
+                try w.print("Receiving Replicate...\n", .{});
+                try w.flush();
+            }
             if (try self.cio.receive(&replicate)) {
                 if (self.env.log.level(2)) |w|
                     prot.printMessage(replicate, w);
 
                 // Indicate the content that we still miss
                 {
+                    if (self.env.log.level(1)) |w| {
+                        try w.print("Computing Missing...\n", .{});
+                        try w.flush();
+                    }
                     var missing = prot.Missing.init(a);
                     defer missing.deinit();
 
                     for (replicate.files.items, 0..) |file, ix0| {
                         const checksum = file.checksum orelse return Error.ExpectedChecksum;
+                        if (self.env.log.level(1)) |w| {
+                            if (ix0 % 1000 == 0) {
+                                try w.print("\t{}\t{s}\n", .{ ix0, std.fmt.bytesToHex(checksum, .lower) });
+                                try w.flush();
+                            }
+                        }
                         if (!self.store.hasFile(checksum)) {
                             try missing.ixs.append(a, ix0);
                         }
                     }
 
+                    if (self.env.log.level(1)) |w| {
+                        try w.print("Sending Missing...\n", .{});
+                        try w.flush();
+                    }
                     try self.cio.send(missing);
                 }
 
@@ -145,12 +163,24 @@ pub const Session = struct {
                     var content = prot.Content.init(a, true);
                     defer content.deinit();
 
+                    if (self.env.log.level(1)) |w| {
+                        try w.print("Receiving Content...\n", .{});
+                        try w.flush();
+                    }
                     if (try self.cio.receive(&content)) {
                         if (self.env.log.level(1)) |w|
                             prot.printMessage(content, w);
 
+                        if (self.env.log.level(1)) |w| {
+                            try w.print("Storing data...\n", .{});
+                            try w.flush();
+                        }
                         for (content.data.items) |str| {
                             try self.store.addFile(crypto.checksum(str), str);
+                        }
+                        if (self.env.log.level(1)) |w| {
+                            try w.print("done\n", .{});
+                            try w.flush();
                         }
                     }
                 }
