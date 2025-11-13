@@ -266,15 +266,29 @@ pub const Session = struct {
         var d = D{ .base = base_dir };
         defer d.deinit();
 
+        if (self.env.log.level(1)) |w| {
+            try w.print("Reconstructing the Tree...\n", .{});
+            try w.flush();
+        }
         for (replicate.files.items) |file| {
             const checksum = file.checksum orelse return Error.ExpectedChecksum;
+            const path = file.path orelse "";
 
-            try d.set(file.path orelse "");
+            if (self.env.log.level(1)) |w| {
+                try w.print("\t{s}/{s}\n", .{ path, file.name });
+                try w.flush();
+            }
+
+            try d.set(path);
 
             if (!try self.store.extractFile(checksum, d.get(), file.name, file.attributes)) {
                 try self.env.log.err("Could not extract file '{s}'\n", .{file.name});
                 return Error.CouldNotExtractFile;
             }
+        }
+        if (self.env.log.level(1)) |w| {
+            try w.print("done\n", .{});
+            try w.flush();
         }
     }
 
