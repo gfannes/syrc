@@ -13,7 +13,7 @@ const Env = rubr.Env;
 pub const Error = error{
     ExpectedIp,
     ExpectedPort,
-    ExpectedReplicate,
+    ExpectedSync,
     ExpectedSrc,
     NotImplemented,
 };
@@ -26,7 +26,7 @@ pub const App = struct {
     ip: ?[]const u8 = null,
     port: ?u16 = null,
     server: ?std.Io.net.Server = null,
-    base: []const u8,
+    subdir: []const u8,
     reset: bool,
     cleanup: bool,
     src: ?[]const u8,
@@ -35,13 +35,13 @@ pub const App = struct {
 
     store: ?blob.Store = null,
 
-    pub fn init(env: Env, mode: cli.Mode, ip: ?[]const u8, port: ?u16, base: []const u8, reset: bool, cleanup: bool, src: ?[]const u8, store_absdir: []const u8, extra: []const []const u8) Self {
+    pub fn init(env: Env, mode: cli.Mode, ip: ?[]const u8, port: ?u16, subdir: []const u8, reset: bool, cleanup: bool, src: ?[]const u8, store_absdir: []const u8, extra: []const []const u8) Self {
         return Self{
             .env = env,
             .mode = mode,
             .ip = ip,
             .port = port,
-            .base = base,
+            .subdir = subdir,
             .reset = reset,
             .cleanup = cleanup,
             .src = src,
@@ -74,16 +74,16 @@ pub const App = struct {
         var src_dir = try std.fs.openDirAbsolute(self.src orelse return Error.ExpectedSrc, .{});
         defer src_dir.close();
 
-        var replicate: prot.Replicate = .{
+        var sync: prot.Sync = .{
             .a = self.env.a,
-            .base = try self.env.a.dupe(u8, "tmp"),
+            .subdir = try self.env.a.dupe(u8, "tmp"),
             .files = try tree.collectFileStates(self.env, src_dir),
         };
-        defer replicate.deinit();
+        defer sync.deinit();
 
         if (self.env.log.level(1)) |w| {
             var root = rubr.naft.Node.init(w);
-            replicate.write(&root);
+            sync.write(&root);
         }
 
         {
@@ -95,7 +95,7 @@ pub const App = struct {
 
             const tw = rubr.comm.TreeWriter{ .out = &writer.interface };
 
-            try tw.writeComposite(&replicate, prot.Replicate.Id);
+            try tw.writeComposite(&sync, prot.Sync.Id);
         }
 
         {
@@ -110,10 +110,10 @@ pub const App = struct {
             var aa = std.heap.ArenaAllocator.init(self.env.a);
             defer aa.deinit();
 
-            var rep = prot.Replicate.init(aa.allocator());
+            var rep = prot.Sync.init(aa.allocator());
             defer rep.deinit();
-            if (!try tr.readComposite(&rep, prot.Replicate.Id))
-                return Error.ExpectedReplicate;
+            if (!try tr.readComposite(&rep, prot.Sync.Id))
+                return Error.ExpectedSync;
         }
     }
 
@@ -134,7 +134,7 @@ pub const App = struct {
         var client = clnt.Session{
             .env = self.env,
             .address = addr,
-            .base = self.base,
+            .subdir = self.subdir,
             .reset = self.reset,
             .cleanup = self.cleanup,
             .src = self.src orelse return Error.ExpectedSrc,
@@ -167,7 +167,7 @@ pub const App = struct {
         var session = clnt.Session{
             .env = self.env,
             .address = try self.address(),
-            .base = self.base,
+            .subdir = self.subdir,
             .reset = self.reset,
             .cleanup = self.cleanup,
             .src = self.src orelse return Error.ExpectedSrc,

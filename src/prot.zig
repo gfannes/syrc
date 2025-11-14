@@ -60,12 +60,12 @@ pub const Hello = struct {
     }
 };
 
-pub const Replicate = struct {
+pub const Sync = struct {
     const Self = @This();
     pub const Id = 4;
 
     a: std.mem.Allocator,
-    base: []const u8 = &.{},
+    subdir: ?[]const u8 = null,
     reset: bool = false,
     cleanup: bool = false,
     files: tree.FileStates = .{},
@@ -74,16 +74,18 @@ pub const Replicate = struct {
         return Self{ .a = a };
     }
     pub fn deinit(self: *Self) void {
-        self.a.free(self.base);
+        if (self.subdir) |subdir|
+            self.a.free(subdir);
         for (self.files.items) |*item|
             item.deinit();
         self.files.deinit(self.a);
     }
 
     pub fn write(self: Self, parent: *rubr.naft.Node) void {
-        var node = parent.node("prot.Replicate");
+        var node = parent.node("prot.Sync");
         defer node.deinit();
-        node.attr("base", self.base);
+        if (self.subdir) |subdir|
+            node.attr("base", subdir);
         node.attr("reset", self.reset);
         node.attr("cleanup", self.cleanup);
         for (self.files.items) |item|
@@ -91,7 +93,9 @@ pub const Replicate = struct {
     }
 
     pub fn writeComposite(self: Self, tw: anytype) !void {
-        try tw.writeLeaf(self.base, 3);
+        if (self.subdir) |subdir|
+            try tw.writeLeaf(subdir, 3);
+
         try tw.writeLeaf(self.reset, 5);
         try tw.writeLeaf(self.cleanup, 7);
         try tw.writeLeaf(self.files.items.len, 9);
@@ -100,8 +104,9 @@ pub const Replicate = struct {
         }
     }
     pub fn readComposite(self: *Self, tr: anytype) !void {
-        if (!try tr.readLeaf(&self.base, 3, self.a))
-            return Error.ExpectedString;
+        var subdir: []const u8 = &.{};
+        if (try tr.readLeaf(&subdir, 3, self.a))
+            self.subdir = subdir;
 
         if (!try tr.readLeaf(&self.reset, 5, {}))
             return Error.ExpectedString;

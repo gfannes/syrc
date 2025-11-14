@@ -9,7 +9,7 @@ const Env = rubr.Env;
 
 pub const Error = error{
     ExpectedHello,
-    ExpectedReplicate,
+    ExpectedSync,
     ExpectedRun,
     ExpectedBye,
     ExpectedStatusOk,
@@ -27,7 +27,7 @@ pub const Session = struct {
 
     env: Env,
     address: std.Io.net.IpAddress,
-    base: []const u8,
+    subdir: []const u8,
     reset: bool,
     cleanup: bool,
     src: []const u8,
@@ -79,24 +79,24 @@ pub const Session = struct {
         }
 
         {
-            var replicate = prot.Replicate.init(self.env.a);
-            defer replicate.deinit();
+            var sync = prot.Sync.init(self.env.a);
+            defer sync.deinit();
 
             var src_dir = try std.fs.openDirAbsolute(self.src, .{});
             defer src_dir.close();
 
-            replicate.base = try replicate.a.dupe(u8, self.base);
-            replicate.reset = self.reset;
-            replicate.cleanup = self.cleanup;
-            replicate.files = try tree.collectFileStates(self.env, src_dir);
+            sync.subdir = try sync.a.dupe(u8, self.subdir);
+            sync.reset = self.reset;
+            sync.cleanup = self.cleanup;
+            sync.files = try tree.collectFileStates(self.env, src_dir);
             if (self.env.log.level(2)) |w|
-                prot.printMessage(replicate, w);
+                prot.printMessage(sync, w);
 
             if (self.env.log.level(1)) |w| {
-                try w.print("Sending Replicate...\n", .{});
+                try w.print("Sending Sync...\n", .{});
                 try w.flush();
             }
-            try self.cio.send(replicate);
+            try self.cio.send(sync);
 
             var missing = prot.Missing.init(self.env.a);
             defer missing.deinit();
@@ -113,9 +113,9 @@ pub const Session = struct {
                 defer content.deinit();
 
                 for (missing.ixs.items) |ix| {
-                    if (ix >= replicate.files.items.len)
+                    if (ix >= sync.files.items.len)
                         return Error.IXOutOfBound;
-                    const file = replicate.files.items[ix];
+                    const file = sync.files.items[ix];
                     const str = file.content orelse return Error.ExpectedContent;
                     try content.data.append(content.a, str);
                 }

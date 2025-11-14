@@ -10,7 +10,7 @@ const Env = rubr.Env;
 
 pub const Error = error{
     ExpectedHello,
-    ExpectedReplicate,
+    ExpectedSync,
     ExpectedRun,
     ExpectedBye,
     ExpectedListeningServer,
@@ -25,6 +25,7 @@ pub const Error = error{
     IXOutOfBound,
     OnlyRelativePathAllowed,
     CouldNotExtractFile,
+    SyncToRootNotSupportedYet,
 };
 
 pub const Server = struct {
@@ -76,7 +77,7 @@ pub const Session = struct {
     env: Env,
     store: *blob.Store,
     cio: comm.Io = undefined,
-    base: ?std.fs.Dir = null,
+    subdir: ?std.fs.Dir = null,
 
     maybe_stdout: ?std.fs.File = null,
     maybe_stderr: ?std.fs.File = null,
@@ -86,8 +87,8 @@ pub const Session = struct {
         self.cio.init(self.env.io, stream);
     }
     pub fn deinit(self: *Self) void {
-        if (self.base) |*base|
-            base.close();
+        if (self.subdir) |*subdir|
+            subdir.close();
     }
 
     pub fn execute(self: *Self) !void {
@@ -119,15 +120,15 @@ pub const Session = struct {
             defer aa.deinit();
             const a = aa.allocator();
 
-            var replicate = prot.Replicate.init(a);
+            var sync = prot.Sync.init(a);
 
             if (self.env.log.level(1)) |w| {
-                try w.print("Receiving Replicate...\n", .{});
+                try w.print("Receiving Sync...\n", .{});
                 try w.flush();
             }
-            if (try self.cio.receive(&replicate)) {
+            if (try self.cio.receive(&sync)) {
                 if (self.env.log.level(2)) |w|
-                    prot.printMessage(replicate, w);
+                    prot.printMessage(sync, w);
 
                 // Indicate the content that we still miss
                 {
@@ -138,7 +139,7 @@ pub const Session = struct {
                     var missing = prot.Missing.init(a);
                     defer missing.deinit();
 
-                    for (replicate.files.items, 0..) |file, ix0| {
+                    for (sync.files.items, 0..) |file, ix0| {
                         const checksum = file.checksum orelse return Error.ExpectedChecksum;
                         if (self.env.log.level(1)) |w| {
                             if (ix0 % 1000 == 0) {
@@ -185,7 +186,7 @@ pub const Session = struct {
                     }
                 }
 
-                try self.doReplicate(replicate);
+                try self.doSync(sync);
             }
         }
 
@@ -210,34 +211,34 @@ pub const Session = struct {
         }
     }
 
-    fn doReplicate(self: *Self, replicate: prot.Replicate) !void {
-        const base = replicate.base;
+    fn doSync(self: *Self, sync: prot.Sync) !void {
+        const subdir = sync.subdir orelse return Error.SyncToRootNotSupportedYet;
 
-        if (base.len == 0)
+        if (subdir.len == 0)
             return Error.EmptyBaseFolder;
-        if (std.fs.path.isAbsolute(base))
+        if (std.fs.path.isAbsolute(subdir))
             return Error.OnlyRelativePathAllowed;
-        if (replicate.reset and rubr.fs.isDirectory(base)) {
+        if (sync.reset and rubr.fs.isDirectory(subdir)) {
             if (self.env.log.level(1)) |w| {
-                try w.print("Deleting {s}\n", .{base});
+                try w.print("Deleting {s}\n", .{subdir});
                 try w.flush();
             }
-            std.fs.cwd().deleteTree(base) catch {};
+            std.fs.cwd().deleteTree(subdir) catch {};
         }
         if (self.env.log.level(1)) |w|
-            try w.print("Creating base {s}\n", .{base});
+            try w.print("Creating subdir {s}\n", .{subdir});
 
-        // Store base dir for prot.Run
-        if (self.base != null)
+        // Store subdir folder for prot.Run
+        if (self.subdir != null)
             return Error.BaseAlreadySet;
 
-        const base_dir = try std.fs.cwd().makeOpenPath(base, .{});
-        self.base = base_dir;
+        const subdir_dir = try std.fs.cwd().makeOpenPath(subdir, .{});
+        self.subdir = subdir_dir;
 
         const D = struct {
             const D = @This();
 
-            base: std.fs.Dir,
+            folder: std.fs.Dir,
             path: []const u8 = &.{},
             dir: ?std.fs.Dir = null,
 
@@ -250,10 +251,10 @@ pub const Session = struct {
                 d.close();
                 d.path = wanted_path;
                 if (d.path.len > 0)
-                    d.dir = try d.base.makeOpenPath(d.path, .{});
+                    d.dir = try d.folder.makeOpenPath(d.path, .{});
             }
             fn get(d: D) std.fs.Dir {
-                return d.dir orelse d.base;
+                return d.dir orelse d.folder;
             }
             fn close(d: *D) void {
                 if (d.dir) |*dd| {
@@ -263,7 +264,7 @@ pub const Session = struct {
                 }
             }
         };
-        var d = D{ .base = base_dir };
+        var d = D{ .folder = subdir_dir };
         defer d.deinit();
 
         if (self.env.log.level(1)) |w| {
@@ -273,14 +274,14 @@ pub const Session = struct {
         var tmp = std.ArrayList(u8){};
         defer tmp.deinit(self.env.a);
         var extract_count: u64 = 0;
-        for (replicate.files.items) |file| {
+        for (sync.files.items) |file| {
             const checksum = file.checksum orelse return Error.ExpectedChecksum;
             const path = file.path orelse "";
 
             try d.set(path);
 
             var do_extract: bool = true;
-            if (!replicate.reset) {
+            if (!sync.reset) {
                 if (d.get().openFile(file.name, .{ .mode = .read_only })) |f| {
                     defer f.close();
 
@@ -329,8 +330,8 @@ pub const Session = struct {
         var proc = std.process.Child.init(argv.items, self.env.a);
 
         // &todo: This might not work for Windows yet: https://github.com/ziglang/zig/issues/5190
-        const base = self.base orelse return Error.BaseNotSet;
-        proc.cwd_dir = base;
+        const folder = self.subdir orelse return Error.BaseNotSet;
+        proc.cwd_dir = folder;
 
         proc.stdout_behavior = .Pipe;
         proc.stderr_behavior = .Pipe;
