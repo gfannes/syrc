@@ -32,6 +32,10 @@ pub const Io = struct {
         try self.tw.writeComposite(obj, @TypeOf(obj).Id);
     }
 
+    pub fn hasData(self: Self) !bool {
+        try self.tr.in.peekByte();
+    }
+
     // Returns true if 'ok' is received, false otherwise
     pub fn receive(self: *Self, ok: anytype) !bool {
         const OkId = @TypeOf(ok.*).Id;

@@ -65,7 +65,7 @@ pub const Session = struct {
             var hello: prot.Hello = undefined;
             if (try self.cio.receive2(&hello, &bye)) {
                 if (self.env.log.level(1)) |w|
-                    prot.printMessage(hello, w);
+                    prot.printMessage(hello, w, null);
                 if (hello.status != .Ok) {
                     try bye.setReason("Expected status Ok, not {}", .{hello.status});
                     try self.cio.send(bye);
@@ -73,7 +73,7 @@ pub const Session = struct {
                 }
             } else {
                 if (self.env.log.level(1)) |w|
-                    prot.printMessage(bye, w);
+                    prot.printMessage(bye, w, null);
                 return Error.PeerGaveUp;
             }
         }
@@ -88,41 +88,71 @@ pub const Session = struct {
             sync.subdir = try sync.a.dupe(u8, self.subdir);
             sync.reset = self.reset;
             sync.cleanup = self.cleanup;
-            sync.files = try tree.collectFileStates(self.env, src_dir);
-            if (self.env.log.level(2)) |w|
-                prot.printMessage(sync, w);
-
-            if (self.env.log.level(1)) |w| {
-                try w.print("Sending Sync...\n", .{});
-                try w.flush();
-            }
+            if (self.env.log.level(1)) |w|
+                prot.printMessage(sync, w, null);
             try self.cio.send(sync);
 
-            var missing = prot.Missing.init(self.env.a);
-            defer missing.deinit();
-
-            if (self.env.log.level(1)) |w| {
-                try w.print("Receiving Missing...\n", .{});
-                try w.flush();
+            var filestates = try tree.collectFileStates(self.env, src_dir);
+            defer {
+                for (filestates.items) |*fs|
+                    fs.deinit();
+                filestates.deinit(self.env.a);
             }
-            if (try self.cio.receive(&missing)) {
-                if (self.env.log.level(1)) |w|
-                    prot.printMessage(missing, w);
 
-                var content = prot.Content.init(self.env.a, false);
-                defer content.deinit();
+            {
+                for (filestates.items, 0..) |fs, count| {
+                    if (self.env.log.level(1)) |w|
+                        prot.printMessage(fs, w, count);
 
-                for (missing.ixs.items) |ix| {
-                    if (ix >= sync.files.items.len)
-                        return Error.IXOutOfBound;
-                    const file = sync.files.items[ix];
-                    const str = file.content orelse return Error.ExpectedContent;
-                    try content.data.append(content.a, str);
+                    try self.cio.send(fs);
                 }
 
+                // Indicate we sent all FileStates
+                const sentinel = prot.FileState.init(self.env.a);
+                try self.cio.send(sentinel);
+
+                if (self.env.log.level(1)) |w| {
+                    try w.print("Sent all FileStates\n", .{});
+                    try w.flush();
+                }
+            }
+
+            var missings = std.ArrayList(usize){};
+            defer missings.deinit(self.env.a);
+            for (0..std.math.maxInt(usize)) |count| {
+                var missing = prot.Missing{};
+                if (try self.cio.receive(&missing)) {
+                    if (self.env.log.level(1)) |w|
+                        prot.printMessage(missing, w, count);
+
+                    if (missing.id) |id| {
+                        try missings.append(self.env.a, id);
+                    } else {
+                        // Peer has all the data
+                        break;
+                    }
+                }
+            }
+            if (self.env.log.level(1)) |w| {
+                try w.print("Server misses {} files\n", .{missings.items.len});
+                try w.flush();
+            }
+
+            for (missings.items, 0..) |id, count| {
+                var content = prot.Content{ .a = null, .id = id };
+                if (id >= filestates.items.len)
+                    return Error.IXOutOfBound;
+                const file = filestates.items[id];
+                content.str = file.content orelse return Error.ExpectedContent;
                 if (self.env.log.level(1)) |w|
-                    prot.printMessage(content, w);
+                    prot.printMessage(content, w, count);
+
                 try self.cio.send(content);
+            }
+            try self.cio.send(prot.Content{ .a = null });
+            if (self.env.log.level(1)) |w| {
+                try w.print("Sent all missing Content\n", .{});
+                try w.flush();
             }
         }
 
@@ -134,6 +164,10 @@ pub const Session = struct {
                 try run.args.append(self.env.a, try run.a.dupe(u8, arg));
 
             try self.cio.send(run);
+            if (self.env.log.level(1)) |w| {
+                try w.print("Sent Run command\n", .{});
+                try w.flush();
+            }
 
             while (true) {
                 var output = prot.Output.init(self.env.a);
@@ -141,13 +175,17 @@ pub const Session = struct {
                 var done = prot.Done{};
                 if (try self.cio.receive2(&output, &done)) {
                     if (self.env.log.level(1)) |w|
-                        prot.printMessage(output, w);
+                        prot.printMessage(output, w, null);
                 } else {
                     if (self.env.log.level(1)) |w|
-                        prot.printMessage(done, w);
+                        prot.printMessage(done, w, null);
                     break;
                 }
             }
+        }
+        if (self.env.log.level(1)) |w| {
+            try w.print("Received all output from Run command\n", .{});
+            try w.flush();
         }
 
         try self.cio.send(bye);

@@ -2,6 +2,7 @@ const std = @import("std");
 const builtin = @import("builtin");
 const crypto = @import("crypto.zig");
 const tree = @import("tree.zig");
+const prot = @import("prot.zig");
 const rubr = @import("rubr.zig");
 
 pub const Error = error{
@@ -99,7 +100,7 @@ pub const Store = struct {
     // &todo: set attributes as well
     // https://cfengine.com/blog/2024/efficient-data-copying-on-modern-linux/
     // Use sendfile() or copy_file_range()
-    pub fn extractFile(self: *Self, key: Key, dir: std.fs.Dir, filename: []const u8, attributes: tree.Attributes) !bool {
+    pub fn extractFile(self: *Self, key: Key, dir: std.fs.Dir, filename: []const u8, attributes: ?prot.FileState.Attributes) !bool {
         {
             const src_dir = self.dir orelse return Error.ExpectedDir;
 
@@ -121,15 +122,17 @@ pub const Store = struct {
 
             try file.writeAll(self.tmp.items);
 
-            var mode: std.Io.File.Mode = 0x8024;
-            if (attributes.read)
-                mode |= 1 << 8;
-            if (attributes.write)
-                mode |= 1 << 7;
-            if (attributes.execute)
-                mode |= 1 << 6;
-            if (builtin.os.tag != .windows)
-                try file.chmod(mode);
+            if (attributes) |attr| {
+                var mode: std.Io.File.Mode = 0x8024;
+                if (attr.read)
+                    mode |= 1 << 8;
+                if (attr.write)
+                    mode |= 1 << 7;
+                if (attr.execute)
+                    mode |= 1 << 6;
+                if (builtin.os.tag != .windows)
+                    try file.chmod(mode);
+            }
         }
 
         return true;

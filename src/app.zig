@@ -15,6 +15,7 @@ pub const Error = error{
     ExpectedPort,
     ExpectedSync,
     ExpectedSrc,
+    ExpectedContent,
     NotImplemented,
 };
 
@@ -63,57 +64,7 @@ pub const App = struct {
             cli.Mode.Client => try self.runClient(),
             cli.Mode.Server => try self.runServer(),
             cli.Mode.Check => try self.runCheck(),
-            cli.Mode.Copy => try self.runCopy(),
             cli.Mode.Test => try self.runTest(),
-            cli.Mode.Broker => return Error.NotImplemented,
-        }
-    }
-
-    fn runCopy(self: *Self) !void {
-        std.debug.print("runCopy {?s}\n", .{self.src});
-        var src_dir = try std.fs.openDirAbsolute(self.src orelse return Error.ExpectedSrc, .{});
-        defer src_dir.close();
-
-        var sync: prot.Sync = .{
-            .a = self.env.a,
-            .subdir = try self.env.a.dupe(u8, "tmp"),
-            .files = try tree.collectFileStates(self.env, src_dir),
-        };
-        defer sync.deinit();
-
-        if (self.env.log.level(1)) |w| {
-            var root = rubr.naft.Node.init(w);
-            sync.write(&root);
-        }
-
-        {
-            const file = try std.fs.cwd().createFile("output.dat", .{});
-            defer file.close();
-
-            var buffer: [1024]u8 = undefined;
-            var writer = file.writer(&buffer);
-
-            const tw = rubr.comm.TreeWriter{ .out = &writer.interface };
-
-            try tw.writeComposite(&sync, prot.Sync.Id);
-        }
-
-        {
-            const file = try std.fs.cwd().openFile("output.dat", .{});
-            defer file.close();
-
-            var buffer: [1024]u8 = undefined;
-            var reader = file.reader(self.env.io, &buffer);
-
-            var tr = rubr.comm.TreeReader{ .in = &reader.interface };
-
-            var aa = std.heap.ArenaAllocator.init(self.env.a);
-            defer aa.deinit();
-
-            var rep = prot.Sync.init(aa.allocator());
-            defer rep.deinit();
-            if (!try tr.readComposite(&rep, prot.Sync.Id))
-                return Error.ExpectedSync;
         }
     }
 
@@ -201,7 +152,8 @@ pub const App = struct {
 
         try writer.interface.print("path\tname\tsize\n", .{});
         for (filestates.items) |filestate| {
-            try writer.interface.print("{s}\t{s}\t{}\n", .{ filestate.path orelse "", filestate.name, filestate.size });
+            const str = filestate.content orelse return Error.ExpectedContent;
+            try writer.interface.print("{s}\t{s}\t{}\n", .{ filestate.path orelse "", filestate.name, str.len });
         }
 
         try writer.interface.flush();

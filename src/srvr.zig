@@ -5,6 +5,7 @@ const prot = @import("prot.zig");
 const comm = @import("comm.zig");
 const blob = @import("blob.zig");
 const crypto = @import("crypto.zig");
+const tree = @import("tree.zig");
 const rubr = @import("rubr.zig");
 const Env = rubr.Env;
 
@@ -16,6 +17,9 @@ pub const Error = error{
     ExpectedListeningServer,
     ExpectedChecksum,
     ExpectedEqualLen,
+    ExpectedFileState,
+    ExpectedContent,
+    ExpectedString,
     EmptyBaseFolder,
     BaseAlreadySet,
     BaseNotSet,
@@ -100,7 +104,7 @@ pub const Session = struct {
             var hello: prot.Hello = undefined;
             if (try self.cio.receive2(&hello, &bye)) {
                 if (self.env.log.level(1)) |w|
-                    prot.printMessage(hello, w);
+                    prot.printMessage(hello, w, null);
                 if (hello.version != prot.My.version) {
                     try bye.setReason("Version mismatch: mine {} !=  peer {}", .{ prot.My.version, hello.version });
                     try self.cio.send(bye);
@@ -109,7 +113,7 @@ pub const Session = struct {
                 try self.cio.send(prot.Hello{ .role = .Client, .status = .Ok });
             } else {
                 if (self.env.log.level(1)) |w|
-                    prot.printMessage(bye, w);
+                    prot.printMessage(bye, w, null);
                 return Error.PeerGaveUp;
             }
         }
@@ -122,72 +126,65 @@ pub const Session = struct {
 
             var sync = prot.Sync.init(a);
 
+            if (!try self.cio.receive(&sync))
+                return Error.ExpectedSync;
+            if (self.env.log.level(1)) |w|
+                prot.printMessage(sync, w, null);
+
+            var filestates = tree.FileStates{};
+            var missings = std.ArrayList(u64){};
+            while (true) {
+                var filestate = prot.FileState.init(a);
+                if (!try self.cio.receive(&filestate))
+                    return Error.ExpectedFileState;
+
+                if (self.env.log.level(1)) |w|
+                    prot.printMessage(filestate, w, filestates.items.len);
+
+                const id = filestate.id orelse break;
+
+                try filestates.append(a, filestate);
+
+                const checksum = filestate.checksum orelse return Error.ExpectedChecksum;
+                if (!self.store.hasFile(checksum)) {
+                    // Indicate we do not have this file
+                    try missings.append(a, id);
+                }
+            }
             if (self.env.log.level(1)) |w| {
-                try w.print("Receiving Sync...\n", .{});
+                try w.print("Received {} FileStates, I miss {}\n", .{ filestates.items.len, missings.items.len });
                 try w.flush();
             }
-            if (try self.cio.receive(&sync)) {
-                if (self.env.log.level(2)) |w|
-                    prot.printMessage(sync, w);
 
-                // Indicate the content that we still miss
-                {
-                    if (self.env.log.level(1)) |w| {
-                        try w.print("Computing Missing...\n", .{});
-                        try w.flush();
-                    }
-                    var missing = prot.Missing.init(a);
-                    defer missing.deinit();
-
-                    for (sync.files.items, 0..) |file, ix0| {
-                        const checksum = file.checksum orelse return Error.ExpectedChecksum;
-                        if (self.env.log.level(1)) |w| {
-                            if (ix0 % 1000 == 0) {
-                                try w.print("\t{}\t{s}\n", .{ ix0, std.fmt.bytesToHex(checksum, .lower) });
-                                try w.flush();
-                            }
-                        }
-                        if (!self.store.hasFile(checksum)) {
-                            try missing.ixs.append(a, ix0);
-                        }
-                    }
-
-                    if (self.env.log.level(1)) |w| {
-                        try w.print("Sending Missing...\n", .{});
-                        try w.flush();
-                    }
-                    try self.cio.send(missing);
-                }
-
-                // Place the missing content in the blob.Store
-                {
-                    var content = prot.Content.init(a, true);
-                    defer content.deinit();
-
-                    if (self.env.log.level(1)) |w| {
-                        try w.print("Receiving Content...\n", .{});
-                        try w.flush();
-                    }
-                    if (try self.cio.receive(&content)) {
-                        if (self.env.log.level(1)) |w|
-                            prot.printMessage(content, w);
-
-                        if (self.env.log.level(1)) |w| {
-                            try w.print("Storing data...\n", .{});
-                            try w.flush();
-                        }
-                        for (content.data.items) |str| {
-                            try self.store.addFile(crypto.checksum(str), str);
-                        }
-                        if (self.env.log.level(1)) |w| {
-                            try w.print("done\n", .{});
-                            try w.flush();
-                        }
-                    }
-                }
-
-                try self.doSync(sync);
+            for (missings.items) |id| {
+                try self.cio.send(prot.Missing{ .id = id });
             }
+            try self.cio.send(prot.Missing{ .id = null });
+            if (self.env.log.level(1)) |w| {
+                try w.print("Sent all Missings\n", .{});
+                try w.flush();
+            }
+
+            for (0..std.math.maxInt(usize)) |count| {
+                var content = prot.Content{ .a = a };
+                if (!try self.cio.receive(&content))
+                    return Error.ExpectedContent;
+
+                if (self.env.log.level(1)) |w|
+                    prot.printMessage(content, w, count);
+
+                if (content.id == null)
+                    break;
+
+                const str = content.str orelse return Error.ExpectedString;
+                try self.store.addFile(crypto.checksum(str), str);
+            }
+            if (self.env.log.level(1)) |w| {
+                try w.print("Received all content\n", .{});
+                try w.flush();
+            }
+
+            try self.doSync(sync, filestates);
         }
 
         // Run
@@ -199,7 +196,7 @@ pub const Session = struct {
 
             if (try self.cio.receive(&run)) {
                 if (self.env.log.level(1)) |w|
-                    prot.printMessage(run, w);
+                    prot.printMessage(run, w, null);
                 try self.doRun(run);
             }
         }
@@ -207,11 +204,11 @@ pub const Session = struct {
         // Hangup
         if (try self.cio.receive(&bye)) {
             if (self.env.log.level(1)) |w|
-                prot.printMessage(bye, w);
+                prot.printMessage(bye, w, null);
         }
     }
 
-    fn doSync(self: *Self, sync: prot.Sync) !void {
+    fn doSync(self: *Self, sync: prot.Sync, filestates: tree.FileStates) !void {
         const subdir = sync.subdir orelse return Error.SyncToRootNotSupportedYet;
 
         if (subdir.len == 0)
@@ -274,7 +271,7 @@ pub const Session = struct {
         var tmp = std.ArrayList(u8){};
         defer tmp.deinit(self.env.a);
         var extract_count: u64 = 0;
-        for (sync.files.items) |file| {
+        for (filestates.items) |file| {
             const checksum = file.checksum orelse return Error.ExpectedChecksum;
             const path = file.path orelse "";
 

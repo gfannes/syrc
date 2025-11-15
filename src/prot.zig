@@ -1,10 +1,10 @@
 const std = @import("std");
 const tree = @import("tree.zig");
+const crypto = @import("crypto.zig");
 const rubr = @import("rubr.zig");
 
 pub const Error = error{
     ExpectedString,
-    ExpectedSize,
     ExpectedVersion,
     ExpectedRole,
     ExpectedStatus,
@@ -14,12 +14,14 @@ pub const Error = error{
     ExpectedArg,
     ExpectedFd,
     ExpectedRc,
-    UnexpectedData,
+    ExpectedCount,
     ReasonAlreadySet,
+    NoAllocatorSet,
+    WrongChecksumSize,
 };
 
 pub const My = struct {
-    pub const version = 0;
+    pub const version = 1;
 };
 
 pub const Hello = struct {
@@ -68,7 +70,6 @@ pub const Sync = struct {
     subdir: ?[]const u8 = null,
     reset: bool = false,
     cleanup: bool = false,
-    files: tree.FileStates = .{},
 
     pub fn init(a: std.mem.Allocator) Self {
         return Self{ .a = a };
@@ -76,9 +77,6 @@ pub const Sync = struct {
     pub fn deinit(self: *Self) void {
         if (self.subdir) |subdir|
             self.a.free(subdir);
-        for (self.files.items) |*item|
-            item.deinit();
-        self.files.deinit(self.a);
     }
 
     pub fn write(self: Self, parent: *rubr.naft.Node) void {
@@ -88,20 +86,13 @@ pub const Sync = struct {
             node.attr("base", subdir);
         node.attr("reset", self.reset);
         node.attr("cleanup", self.cleanup);
-        for (self.files.items) |item|
-            item.write(&node);
     }
 
     pub fn writeComposite(self: Self, tw: anytype) !void {
         if (self.subdir) |subdir|
             try tw.writeLeaf(subdir, 3);
-
         try tw.writeLeaf(self.reset, 5);
         try tw.writeLeaf(self.cleanup, 7);
-        try tw.writeLeaf(self.files.items.len, 9);
-        for (self.files.items) |file| {
-            try tw.writeComposite(file, 2);
-        }
     }
     pub fn readComposite(self: *Self, tr: anytype) !void {
         var subdir: []const u8 = &.{};
@@ -113,116 +104,228 @@ pub const Sync = struct {
 
         if (!try tr.readLeaf(&self.cleanup, 7, {}))
             return Error.ExpectedString;
+    }
+};
 
-        var size: usize = undefined;
-        if (!try tr.readLeaf(&size, 9, {}))
-            return Error.ExpectedSize;
+pub const FileState = struct {
+    const Self = @This();
+    pub const Id = 6;
+    pub const Attributes = struct {
+        read: bool = true,
+        write: bool = false,
+        execute: bool = false,
+    };
+    pub const Timestamp = u32;
 
-        var files = tree.FileStates{};
-        try files.resize(self.a, size);
-        for (files.items) |*file| {
-            file.* = tree.FileState.init(self.a);
-            if (!try tr.readComposite(file, 2))
-                return Error.ExpectedFileState;
+    a: std.mem.Allocator,
+    id: ?u64 = null,
+    path: ?[]const u8 = null,
+    name: []const u8 = &.{},
+    content: ?[]const u8 = null,
+    checksum: ?crypto.Checksum = null,
+    attributes: ?Attributes = null,
+    timestamp: ?Timestamp = null,
+
+    pub fn init(a: std.mem.Allocator) Self {
+        return Self{ .a = a };
+    }
+    pub fn deinit(self: *Self) void {
+        if (self.path) |path|
+            self.a.free(path);
+        if (self.content) |content|
+            self.a.free(content);
+        self.a.free(self.name);
+    }
+
+    pub fn filename(self: Self, a: std.mem.Allocator) ![]const u8 {
+        if (self.path) |path| {
+            const parts = [_][]const u8{ path, "/", self.name };
+            return std.mem.concat(a, u8, &parts);
+        } else {
+            return a.dupe(u8, self.name);
         }
-        self.files = files;
+    }
 
-        if (!try tr.isClose())
-            return Error.UnexpectedData;
+    pub fn writeComposite(self: Self, tw: anytype) !void {
+        if (self.id) |id|
+            try tw.writeLeaf(id, 3);
+        if (self.path) |path|
+            try tw.writeLeaf(path, 5);
+        if (self.name.len > 0)
+            try tw.writeLeaf(self.name, 7);
+
+        if (self.attributes) |attributes| {
+            var flags: u3 = 0;
+            flags <<= 1;
+            flags += if (attributes.read) 1 else 0;
+            flags <<= 1;
+            flags += if (attributes.write) 1 else 0;
+            flags <<= 1;
+            flags += if (attributes.execute) 1 else 0;
+            try tw.writeLeaf(flags, 9);
+        }
+
+        if (self.timestamp) |timestamp|
+            try tw.writeLeaf(timestamp, 11);
+
+        if (self.checksum) |cs|
+            try tw.writeLeaf(&cs, 13);
+    }
+    pub fn readComposite(self: *Self, tr: anytype) !void {
+        {
+            var id: u64 = undefined;
+            self.id = if (try tr.readLeaf(&id, 3, {}))
+                id
+            else
+                null;
+        }
+
+        {
+            var path: []const u8 = &.{};
+            self.path = if (try tr.readLeaf(&path, 5, self.a))
+                path
+            else
+                null;
+        }
+
+        if (!try tr.readLeaf(&self.name, 7, self.a))
+            self.name = &.{};
+
+        {
+            var flags: u3 = undefined;
+            self.attributes = if (try tr.readLeaf(&flags, 9, {}))
+                .{
+                    .read = flags & (1 << 2) != 0,
+                    .write = flags & (1 << 1) != 0,
+                    .execute = flags & (1 << 0) != 0,
+                }
+            else
+                null;
+        }
+
+        {
+            var timestamp: Timestamp = undefined;
+            self.timestamp = if (try tr.readLeaf(&timestamp, 11, {}))
+                timestamp
+            else
+                null;
+        }
+
+        {
+            var buf: crypto.Checksum = undefined;
+            var fba = std.heap.FixedBufferAllocator.init(&buf);
+            var checksum: []const u8 = &.{};
+            if (try tr.readLeaf(&checksum, 13, fba.allocator())) {
+                if (checksum.len != buf.len)
+                    return Error.WrongChecksumSize;
+                self.checksum = buf;
+            } else {
+                self.checksum = null;
+            }
+        }
+    }
+
+    pub fn write(self: Self, parent: *rubr.naft.Node) void {
+        var node = parent.node("tree.FileState");
+        defer node.deinit();
+        if (self.id) |id|
+            node.attr("id", id);
+        if (self.path) |path|
+            node.attr("path", path);
+        if (self.name.len > 0)
+            node.attr("name", self.name);
+        if (self.content) |content|
+            node.attr("content_size", content.len);
+        if (self.attributes) |attributes| {
+            var attr: [3]u8 = .{ '-', '-', '-' };
+            if (attributes.read)
+                attr[0] = 'r';
+            if (attributes.write)
+                attr[1] = 'w';
+            if (attributes.execute)
+                attr[2] = 'x';
+            node.attr("attr", &attr);
+        }
+        if (self.checksum) |checksum| {
+            var buffer: [2 * rubr.util.arrayLenOf(crypto.Checksum)]u8 = undefined;
+            for (checksum, 0..) |byte, ix0| {
+                const ix = 2 * ix0;
+                _ = std.fmt.bufPrint(buffer[ix .. ix + 2], "{x:0>2}", .{byte}) catch unreachable;
+            }
+            node.attr("checksum", &buffer);
+        }
     }
 };
 
 pub const Missing = struct {
     const Self = @This();
     const IXs = std.ArrayList(usize);
-    pub const Id = 6;
+    pub const Id = 8;
 
-    a: std.mem.Allocator,
-    ixs: IXs = .{},
-
-    pub fn init(a: std.mem.Allocator) Self {
-        return Self{ .a = a };
-    }
-    pub fn deinit(self: *Self) void {
-        self.ixs.deinit(self.a);
-    }
+    id: ?u64 = null,
 
     pub fn write(self: Self, parent: *rubr.naft.Node) void {
         var node = parent.node("prot.Missing");
         defer node.deinit();
 
-        for (self.ixs.items) |ix| {
-            var n = node.node("Index");
-            defer n.deinit();
-            n.attr("ix", ix);
-        }
+        if (self.id) |id|
+            node.attr("id", id);
     }
 
     pub fn writeComposite(self: Self, tw: anytype) !void {
-        try tw.writeLeaf(self.ixs.items.len, 3);
-        for (self.ixs.items) |ix| {
-            try tw.writeLeaf(ix, 5);
-        }
+        if (self.id) |id|
+            try tw.writeLeaf(id, 3);
     }
     pub fn readComposite(self: *Self, tr: anytype) !void {
-        var size: usize = undefined;
-        if (!try tr.readLeaf(&size, 3, {}))
-            return Error.ExpectedSize;
-
-        try self.ixs.resize(self.a, size);
-        for (self.ixs.items) |*ix| {
-            if (!try tr.readLeaf(ix, 5, {}))
-                return Error.ExpectedIX;
-        }
+        var id: u64 = undefined;
+        self.id = if (try tr.readLeaf(&id, 3, {}))
+            id
+        else
+            null;
     }
 };
 
 pub const Content = struct {
     const Self = @This();
-    const Data = std.ArrayList([]const u8);
-    pub const Id = 8;
+    pub const Id = 10;
 
-    a: std.mem.Allocator,
-    owning: bool,
-    data: Data = .{},
+    // If set, `a` will be used to free `str`.
+    a: ?std.mem.Allocator,
+    id: ?u64 = null,
+    str: ?[]const u8 = null,
 
-    pub fn init(a: std.mem.Allocator, owning: bool) Self {
-        return Self{ .a = a, .owning = owning };
-    }
     pub fn deinit(self: *Self) void {
-        if (self.owning) {
-            for (self.data.items) |str|
-                self.a.free(str);
-        }
-        self.data.deinit(self.a);
+        if (self.str) |str|
+            if (self.a) |a|
+                a.free(str);
     }
 
     pub fn write(self: Self, parent: *rubr.naft.Node) void {
         var node = parent.node("prot.Content");
         defer node.deinit();
-        for (self.data.items) |str| {
-            var n = node.node("Content");
-            defer n.deinit();
-            n.attr("size", str.len);
-        }
+        if (self.id) |id|
+            node.attr("id", id);
+        if (self.str) |str|
+            node.attr("len", str.len);
     }
 
     pub fn writeComposite(self: Self, tw: anytype) !void {
-        try tw.writeLeaf(self.data.items.len, 3);
-        for (self.data.items) |str| {
+        if (self.id) |id|
+            try tw.writeLeaf(id, 3);
+        if (self.str) |str|
             try tw.writeLeaf(str, 5);
-        }
     }
     pub fn readComposite(self: *Self, tr: anytype) !void {
-        var size: usize = undefined;
-        if (!try tr.readLeaf(&size, 3, {}))
-            return Error.ExpectedSize;
+        var id: u64 = undefined;
+        self.id = if (try tr.readLeaf(&id, 3, {}))
+            id
+        else
+            null;
 
-        try self.data.resize(self.a, size);
-        for (self.data.items) |*str| {
-            if (!try tr.readLeaf(str, 5, self.a))
-                return Error.ExpectedString;
-        }
+        const a = self.a orelse return Error.NoAllocatorSet;
+        var str: []const u8 = &.{};
+        if (try tr.readLeaf(&str, 5, a))
+            self.str = str;
     }
 };
 
@@ -263,11 +366,11 @@ pub const Run = struct {
         if (!try tr.readLeaf(&self.cmd, 3, self.a))
             return Error.ExpectedCmd;
 
-        var size: usize = undefined;
-        if (!try tr.readLeaf(&size, 5, {}))
-            return Error.ExpectedSize;
+        var count: usize = undefined;
+        if (!try tr.readLeaf(&count, 5, {}))
+            return Error.ExpectedCount;
 
-        try self.args.resize(self.a, size);
+        try self.args.resize(self.a, count);
         for (self.args.items) |*arg| {
             if (!try tr.readLeaf(arg, 7, self.a))
                 return Error.ExpectedArg;
@@ -408,8 +511,11 @@ pub const Bye = struct {
     }
 };
 
-pub fn printMessage(obj: anytype, w: *std.Io.Writer) void {
-    var node = rubr.naft.Node.init(w);
-    defer node.deinit();
-    obj.write(&node);
+pub fn printMessage(obj: anytype, w: *std.Io.Writer, count: ?usize) void {
+    // When `count` is provided, we only print the powers of 2
+    if (@popCount(count orelse 0) <= 1) {
+        var node = rubr.naft.Node.init(w);
+        defer node.deinit();
+        obj.write(&node);
+    }
 }
