@@ -19,8 +19,13 @@
 - [*] Reduce 10GB data that is loaded for root-all
 	- Remove `cli/espcap_ahp/qc/scenario_espcap_v2/auro-440/bianca/FhG_src_drop_renderers_v1.0.0_20180828_0bfbf8ce.zip`
 	- Many `.wav` files
-- [*] Fix `rake ut[core/audio]` over syrc
+- [x] Fix `rake ut[core/audio]` over syrc
 	- Due to missing `sine440.wav`
+- [x] Rework protocol to support early sending of items
+	- Main use case is a large tree with just a few updates
+		- Send FileState during discovery
+		- Do not send Missing/Content while still receiving FileStates
+- [*] Implement Collect
 - [ ] Support for reusing an existing tree without removal
 - Reuse object files by moving the cache outside of core/build/cache/cook
 - [ ] Create tree state
