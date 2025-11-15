@@ -198,6 +198,10 @@ pub const Session = struct {
                 if (self.env.log.level(1)) |w|
                     prot.printMessage(run, w, null);
                 try self.doRun(run);
+
+                // Collect
+                var collect = prot.Collect{};
+                if (try self.cio.receive(&collect)) {}
             }
         }
 

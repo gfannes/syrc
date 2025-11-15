@@ -472,9 +472,30 @@ pub const Done = struct {
     }
 };
 
-pub const Bye = struct {
+pub const Collect = struct {
     const Self = @This();
     pub const Id = 18;
+
+    pub fn write(self: Self, parent: *rubr.naft.Node) void {
+        _ = self;
+
+        var node = parent.node("prot.Collect");
+        defer node.deinit();
+    }
+
+    pub fn writeComposite(self: Self, tw: anytype) !void {
+        _ = self;
+        _ = tw;
+    }
+    pub fn readComposite(self: *Self, tr: anytype) !void {
+        _ = self;
+        _ = tr;
+    }
+};
+
+pub const Bye = struct {
+    const Self = @This();
+    pub const Id = 20;
 
     a: std.mem.Allocator,
     reason: ?[]const u8 = null,

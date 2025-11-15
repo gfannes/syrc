@@ -59,9 +59,10 @@ pub const Session = struct {
         var bye = prot.Bye.init(self.env.a);
         defer bye.deinit();
 
-        try self.cio.send(prot.Hello{ .role = .Client, .status = .Pending });
-
+        // Handshake
         {
+            try self.cio.send(prot.Hello{ .role = .Client, .status = .Pending });
+
             var hello: prot.Hello = undefined;
             if (try self.cio.receive2(&hello, &bye)) {
                 if (self.env.log.level(1)) |w|
@@ -78,6 +79,7 @@ pub const Session = struct {
             }
         }
 
+        // Sync
         {
             var sync = prot.Sync.init(self.env.a);
             defer sync.deinit();
@@ -156,6 +158,7 @@ pub const Session = struct {
             }
         }
 
+        // Run
         if (self.maybe_cmd) |cmd| {
             var run = prot.Run.init(self.env.a);
             defer run.deinit();
@@ -182,12 +185,18 @@ pub const Session = struct {
                     break;
                 }
             }
-        }
-        if (self.env.log.level(1)) |w| {
-            try w.print("Received all output from Run command\n", .{});
-            try w.flush();
+            if (self.env.log.level(1)) |w| {
+                try w.print("Received all output from Run command\n", .{});
+                try w.flush();
+            }
+
+            // Collect
+            {
+                try self.cio.send(prot.Collect{});
+            }
         }
 
+        // Hangup
         try self.cio.send(bye);
     }
 };
