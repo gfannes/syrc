@@ -4,7 +4,6 @@ const std = @import("std");
 const prot = @import("prot.zig");
 const comm = @import("comm.zig");
 const blob = @import("blob.zig");
-const tree = @import("tree.zig");
 const rubr = @import("rubr.zig");
 const Env = rubr.Env;
 

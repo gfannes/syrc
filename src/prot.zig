@@ -1,5 +1,4 @@
 const std = @import("std");
-const tree = @import("tree.zig");
 const crypto = @import("crypto.zig");
 const rubr = @import("rubr.zig");
 
@@ -226,7 +225,7 @@ pub const FileState = struct {
     }
 
     pub fn write(self: Self, parent: *rubr.naft.Node) void {
-        var node = parent.node("tree.FileState");
+        var node = parent.node("prot.FileState");
         defer node.deinit();
         if (self.id) |id|
             node.attr("id", id);

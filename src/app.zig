@@ -1,7 +1,7 @@
 const std = @import("std");
 const cli = @import("cli.zig");
 const rubr = @import("rubr.zig");
-const tree = @import("tree.zig");
+const fs = @import("fs.zig");
 const prot = @import("prot.zig");
 const crypto = @import("crypto.zig");
 const srvr = @import("srvr.zig");
@@ -110,12 +110,8 @@ pub const App = struct {
         var src_dir = try std.fs.openDirAbsolute(self.args.base, .{});
         defer src_dir.close();
 
-        var filestates = try tree.collectFileStates(self.env, src_dir);
-        defer {
-            for (filestates.items) |*filestate|
-                filestate.deinit();
-            filestates.deinit(self.env.a);
-        }
+        var tree = try fs.collectTree(self.env, src_dir);
+        defer tree.deinit();
 
         const file = try std.fs.cwd().createFile("filestates.csv", .{});
         defer file.close();
@@ -124,7 +120,7 @@ pub const App = struct {
         var writer = file.writer(&buf);
 
         try writer.interface.print("path\tname\tsize\n", .{});
-        for (filestates.items) |filestate| {
+        for (tree.filestates.items) |filestate| {
             const str = filestate.content orelse return Error.ExpectedContent;
             try writer.interface.print("{s}\t{s}\t{}\n", .{ filestate.path orelse "", filestate.name, str.len });
         }

@@ -1,6 +1,6 @@
 const std = @import("std");
 const prot = @import("../prot.zig");
-const tree = @import("../tree.zig");
+const fs = @import("../fs.zig");
 const blob = @import("../blob.zig");
 const crypto = @import("../crypto.zig");
 const rubr = @import("../rubr.zig");
@@ -17,15 +17,14 @@ pub const Error = error{
     ExpectedChecksum,
     ExpectedEqualLen,
     ExpectedFileState,
-    ExpectedContent,
     ExpectedString,
+    ExpectedContent,
     EmptyBaseFolder,
     BaseAlreadySet,
     BaseNotSet,
     UnknownId,
     VersionMismatch,
     PeerGaveUp,
-    IXOutOfBound,
     OnlyRelativePathAllowed,
     CouldNotExtractFile,
     SyncToRootNotSupportedYet,
@@ -98,19 +97,15 @@ pub fn runClient(self: *Self, name: ?[]const u8, reset: bool, cleanup: bool) !vo
             prot.printMessage(sync, w, null);
         try self.cio.send(sync);
 
-        var filestates = try tree.collectFileStates(self.env, folder_dir);
-        defer {
-            for (filestates.items) |*fs|
-                fs.deinit();
-            filestates.deinit(self.env.a);
-        }
+        var tree = try fs.collectTree(self.env, folder_dir);
+        defer tree.deinit();
 
         {
-            for (filestates.items, 0..) |fs, count| {
+            for (tree.filestates.items, 0..) |filestate, count| {
                 if (self.env.log.level(1)) |w|
-                    prot.printMessage(fs, w, count);
+                    prot.printMessage(filestate, w, count);
 
-                try self.cio.send(fs);
+                try self.cio.send(filestate);
             }
 
             // Indicate we sent all FileStates
@@ -146,10 +141,9 @@ pub fn runClient(self: *Self, name: ?[]const u8, reset: bool, cleanup: bool) !vo
 
         for (missings.items, 0..) |id, count| {
             var content = prot.Content{ .a = null, .id = id };
-            if (id >= filestates.items.len)
-                return Error.IXOutOfBound;
-            const file = filestates.items[id];
-            content.str = file.content orelse return Error.ExpectedContent;
+
+            content.str = try tree.getContent(id);
+
             if (self.env.log.level(1)) |w|
                 prot.printMessage(content, w, count);
 
@@ -240,7 +234,10 @@ pub fn runServer(self: *Self) !void {
         if (self.env.log.level(1)) |w|
             prot.printMessage(sync, w, null);
 
-        var filestates = tree.FileStates{};
+        var tree = fs.Tree{ .env = self.env };
+        tree.env.a = a;
+        defer tree.deinit();
+
         var missings = std.ArrayList(u64){};
         while (true) {
             var filestate = prot.FileState.init(a);
@@ -248,11 +245,11 @@ pub fn runServer(self: *Self) !void {
                 return Error.ExpectedFileState;
 
             if (self.env.log.level(1)) |w|
-                prot.printMessage(filestate, w, filestates.items.len);
+                prot.printMessage(filestate, w, tree.filestates.items.len);
 
             const id = filestate.id orelse break;
 
-            try filestates.append(a, filestate);
+            try tree.filestates.append(a, filestate);
 
             const checksum = filestate.checksum orelse return Error.ExpectedChecksum;
             if (!self.store.hasFile(checksum)) {
@@ -261,7 +258,7 @@ pub fn runServer(self: *Self) !void {
             }
         }
         if (self.env.log.level(1)) |w| {
-            try w.print("Received {} FileStates, I miss {}\n", .{ filestates.items.len, missings.items.len });
+            try w.print("Received {} FileStates, I miss {}\n", .{ tree.filestates.items.len, missings.items.len });
             try w.flush();
         }
 
@@ -293,7 +290,7 @@ pub fn runServer(self: *Self) !void {
             try w.flush();
         }
 
-        try self.doSync(sync, filestates);
+        try self.doSync(sync, tree);
     }
 
     // Run
@@ -321,7 +318,7 @@ pub fn runServer(self: *Self) !void {
     }
 }
 
-fn doSync(self: *Self, sync: prot.Sync, filestates: tree.FileStates) !void {
+fn doSync(self: *Self, sync: prot.Sync, tree: fs.Tree) !void {
     const subdir = sync.subdir orelse return Error.SyncToRootNotSupportedYet;
 
     if (subdir.len == 0)
@@ -384,7 +381,7 @@ fn doSync(self: *Self, sync: prot.Sync, filestates: tree.FileStates) !void {
     var tmp = std.ArrayList(u8){};
     defer tmp.deinit(self.env.a);
     var extract_count: u64 = 0;
-    for (filestates.items) |file| {
+    for (tree.filestates.items) |file| {
         const checksum = file.checksum orelse return Error.ExpectedChecksum;
         const path = file.path orelse "";
 

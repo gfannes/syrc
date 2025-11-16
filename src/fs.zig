@@ -6,30 +6,46 @@ const Env = rubr.Env;
 
 pub const Error = error{
     ExpectedOffsets,
+    ExpectedContent,
+    IXOutOfBound,
 };
 
-pub const FileStates = std.ArrayList(prot.FileState);
+pub const Tree = struct {
+    const Self = @This();
+    pub const FileStates = std.ArrayList(prot.FileState);
 
-pub fn collectFileStates(env: Env, dir: std.fs.Dir) !FileStates {
+    env: Env,
+    filestates: FileStates = .{},
+
+    pub fn deinit(self: *Self) void {
+        for (self.filestates.items) |*fs|
+            fs.deinit();
+        self.filestates.deinit(self.env.a);
+    }
+
+    pub fn getContent(self: Self, id: u64) ![]const u8 {
+        if (id >= self.filestates.items.len)
+            return Error.IXOutOfBound;
+        const file = self.filestates.items[id];
+        return file.content orelse return Error.ExpectedContent;
+    }
+};
+
+pub fn collectTree(env: Env, dir: std.fs.Dir) !Tree {
     const Collector = struct {
         const My = @This();
         const Buffer = std.ArrayList(u8);
 
         env: Env,
         dir: std.fs.Dir,
-        filestates: FileStates = .{},
+        filestates: *Tree.FileStates,
         walker: rubr.walker.Walker,
+
         total_size: u64 = 0,
         // If buffer is present, it will be used to read-in content iso FileState.content
         buffer: ?Buffer = null,
 
-        fn init(dirr: std.fs.Dir, envv: Env) My {
-            return My{ .dir = dirr, .env = envv, .walker = rubr.walker.Walker{ .env = envv } };
-        }
         fn deinit(my: *My) void {
-            for (my.filestates.items) |*item|
-                item.deinit();
-            my.filestates.deinit(my.env.a);
             my.walker.deinit();
             if (my.buffer) |*buf|
                 buf.deinit(my.env.a);
@@ -95,13 +111,17 @@ pub fn collectFileStates(env: Env, dir: std.fs.Dir) !FileStates {
         }
     };
 
-    var collector = Collector.init(dir, env);
+    var res = Tree{ .env = env };
+
+    var collector = Collector{
+        .env = env,
+        .dir = dir,
+        .filestates = &res.filestates,
+        .walker = rubr.walker.Walker{ .env = env },
+    };
     defer collector.deinit();
 
     try collector.collect();
-
-    var res = FileStates{};
-    std.mem.swap(FileStates, &res, &collector.filestates);
 
     return res;
 }
