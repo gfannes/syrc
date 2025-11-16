@@ -6,7 +6,7 @@ pub const Error = error{
     ExpectedExeName,
     ExpectedNumber,
     ExpectedFolder,
-    ExpectedDestination,
+    ExpectedName,
     ExpectedIp,
     ExpectedPort,
     ExpectedMode,
@@ -16,8 +16,8 @@ pub const Error = error{
 const Default = struct {
     const port: u16 = 1357;
     const ip: []const u8 = "0.0.0.0";
-    const base: []const u8 = "tmp";
     const store_dir: []const u8 = ".cache/syrc/blob";
+    const name: []const u8 = "syrc-tmp";
 };
 
 pub const Mode = enum { Client, Server, Check, Test };
@@ -32,14 +32,12 @@ pub const Args = struct {
     exe_name: []const u8 = &.{},
     print_help: bool = false,
     verbose: usize = 1,
-    src: []const u8 = ".",
-    src_buf: [std.fs.max_path_bytes]u8 = undefined,
-    dst: ?[]const u8 = null,
+    base: []const u8 = &.{},
+    name: []const u8 = Default.name,
     ip: []const u8 = Default.ip,
     port: u16 = Default.port,
     mode: Mode = Mode.Test,
     j: usize = 0,
-    base: []const u8 = Default.base,
     reset: bool = false,
     cleanup: bool = false,
     store_path: []const u8 = Default.store_dir,
@@ -64,12 +62,10 @@ pub const Args = struct {
                 self.verbose = try (self.args.pop() orelse return Error.ExpectedNumber).as(usize);
             } else if (arg.is("-j", "--jobs")) {
                 self.j = try (self.args.pop() orelse return Error.ExpectedNumber).as(usize);
-            } else if (arg.is("-s", "--src")) {
-                self.src = (self.args.pop() orelse return Error.ExpectedFolder).arg;
-            } else if (arg.is("-d", "--dst")) {
-                self.dst = (self.args.pop() orelse return Error.ExpectedDestination).arg;
             } else if (arg.is("-b", "--base")) {
                 self.base = (self.args.pop() orelse return Error.ExpectedFolder).arg;
+            } else if (arg.is("-n", "--name")) {
+                self.name = (self.args.pop() orelse return Error.ExpectedName).arg;
             } else if (arg.is("-r", "--reset")) {
                 self.reset = true;
             } else if (arg.is("-c", "--cleanup")) {
@@ -97,8 +93,9 @@ pub const Args = struct {
             }
         }
 
-        if (!std.fs.path.isAbsolute(self.src)) {
-            self.src = try std.fs.cwd().realpath(self.src, &self.src_buf);
+        if (!std.fs.path.isAbsolute(self.base)) {
+            const part = if (self.base.len == 0) "." else self.base;
+            self.base = try rubr.fs.cwdPathAlloc(self.env.aa, part);
         }
         if (!std.fs.path.isAbsolute(self.store_path)) {
             self.store_path = try rubr.fs.homeDirAlloc(self.env.aa, self.store_path);
@@ -107,14 +104,13 @@ pub const Args = struct {
         }
     }
 
-    pub fn printHelp(self: Self) void {
+    pub fn printHelp(self: Self) !void {
         std.debug.print("Help for {s}\n", .{self.exe_name});
         std.debug.print("    -h/--help                  Print this help\n", .{});
         std.debug.print("    -v/--verbose     LEVEL     Verbosity level\n", .{});
         std.debug.print("    -j/--jobs        NUMBER    Number of threads to use [optional, default is {}]\n", .{self.j});
-        std.debug.print("    -s/--src         FOLDER    Source folder to synchronize\n", .{});
-        std.debug.print("    -d/--dst         DEST      Remote destination\n", .{});
-        std.debug.print("    -b/--base        FOLDER    Base folder to use on remote site [optional, default is '{s}']\n", .{Default.base});
+        std.debug.print("    -b/--base        FOLDER    Base folder to use [optional, default is '{s}']\n", .{try rubr.fs.cwdPathAlloc(self.env.aa, null)});
+        std.debug.print("    -n/--name        NAME      Name to use [optional, default is '{s}']\n", .{Default.name});
         std.debug.print("    -r/--reset                 Force a reset of the base destination folder [optional, default is 'no']\n", .{});
         std.debug.print("    -c/--cleanup               Cleanup the base destination folder after use [optional, default is 'no']\n", .{});
         std.debug.print("    -a/--ip          ADDRESS   Ip address [optional, default is {s}]\n", .{Default.ip});

@@ -25,7 +25,7 @@
 	- Main use case is a large tree with just a few updates
 		- Send FileState during discovery
 		- Do not send Missing/Content while still receiving FileStates
-- [*] Implement Collect
+- [/] Implement Collect
 - [ ] Support for reusing an existing tree without removal
 - Reuse object files by moving the cache outside of core/build/cache/cook
 - [ ] Create tree state

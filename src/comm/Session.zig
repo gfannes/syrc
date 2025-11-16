@@ -1,0 +1,513 @@
+const std = @import("std");
+const prot = @import("../prot.zig");
+const tree = @import("../tree.zig");
+const blob = @import("../blob.zig");
+const crypto = @import("../crypto.zig");
+const rubr = @import("../rubr.zig");
+const Env = rubr.Env;
+const Io = @import("Io.zig");
+
+const Self = @This();
+
+pub const Error = error{
+    ExpectedHello,
+    ExpectedSync,
+    ExpectedRun,
+    ExpectedBye,
+    ExpectedChecksum,
+    ExpectedEqualLen,
+    ExpectedFileState,
+    ExpectedContent,
+    ExpectedString,
+    EmptyBaseFolder,
+    BaseAlreadySet,
+    BaseNotSet,
+    UnknownId,
+    VersionMismatch,
+    PeerGaveUp,
+    IXOutOfBound,
+    OnlyRelativePathAllowed,
+    CouldNotExtractFile,
+    SyncToRootNotSupportedYet,
+    ExpectedStatusOk,
+};
+
+env: Env,
+store: *blob.Store,
+folder: []const u8,
+
+stream: ?std.Io.net.Stream = null,
+cio: Io = undefined,
+maybe_cmd: ?[]const u8 = null,
+args: []const []const u8 = &.{},
+
+subdir: ?std.fs.Dir = null,
+maybe_stdout: ?std.fs.File = null,
+maybe_stderr: ?std.fs.File = null,
+mutex: std.Thread.Mutex = .{},
+
+pub fn init(self: *Self, stream: std.Io.net.Stream) !void {
+    self.stream = stream;
+    self.cio.init(self.env.io, stream);
+}
+
+pub fn deinit(self: *Self) void {
+    if (self.stream) |*stream|
+        stream.close(self.env.io);
+    if (self.subdir) |*subdir|
+        subdir.close();
+}
+
+pub fn runClient(self: *Self, name: ?[]const u8, reset: bool, cleanup: bool) !void {
+    var bye = prot.Bye.init(self.env.a);
+    defer bye.deinit();
+
+    // Handshake
+    {
+        try self.cio.send(prot.Hello{ .role = .Client, .status = .Pending });
+
+        var hello: prot.Hello = undefined;
+        if (try self.cio.receive2(&hello, &bye)) {
+            if (self.env.log.level(1)) |w|
+                prot.printMessage(hello, w, null);
+            if (hello.status != .Ok) {
+                try bye.setReason("Expected status Ok, not {}", .{hello.status});
+                try self.cio.send(bye);
+                return Error.ExpectedStatusOk;
+            }
+        } else {
+            if (self.env.log.level(1)) |w|
+                prot.printMessage(bye, w, null);
+            return Error.PeerGaveUp;
+        }
+    }
+
+    // Sync
+    {
+        var sync = prot.Sync.init(self.env.a);
+        defer sync.deinit();
+
+        var folder_dir = try std.fs.openDirAbsolute(self.folder, .{});
+        defer folder_dir.close();
+
+        if (name) |str|
+            sync.subdir = try sync.a.dupe(u8, str);
+        sync.reset = reset;
+        sync.cleanup = cleanup;
+        if (self.env.log.level(1)) |w|
+            prot.printMessage(sync, w, null);
+        try self.cio.send(sync);
+
+        var filestates = try tree.collectFileStates(self.env, folder_dir);
+        defer {
+            for (filestates.items) |*fs|
+                fs.deinit();
+            filestates.deinit(self.env.a);
+        }
+
+        {
+            for (filestates.items, 0..) |fs, count| {
+                if (self.env.log.level(1)) |w|
+                    prot.printMessage(fs, w, count);
+
+                try self.cio.send(fs);
+            }
+
+            // Indicate we sent all FileStates
+            const sentinel = prot.FileState.init(self.env.a);
+            try self.cio.send(sentinel);
+
+            if (self.env.log.level(1)) |w| {
+                try w.print("Sent all FileStates\n", .{});
+                try w.flush();
+            }
+        }
+
+        var missings = std.ArrayList(usize){};
+        defer missings.deinit(self.env.a);
+        for (0..std.math.maxInt(usize)) |count| {
+            var missing = prot.Missing{};
+            if (try self.cio.receive(&missing)) {
+                if (self.env.log.level(1)) |w|
+                    prot.printMessage(missing, w, count);
+
+                if (missing.id) |id| {
+                    try missings.append(self.env.a, id);
+                } else {
+                    // Peer has all the data
+                    break;
+                }
+            }
+        }
+        if (self.env.log.level(1)) |w| {
+            try w.print("Server misses {} files\n", .{missings.items.len});
+            try w.flush();
+        }
+
+        for (missings.items, 0..) |id, count| {
+            var content = prot.Content{ .a = null, .id = id };
+            if (id >= filestates.items.len)
+                return Error.IXOutOfBound;
+            const file = filestates.items[id];
+            content.str = file.content orelse return Error.ExpectedContent;
+            if (self.env.log.level(1)) |w|
+                prot.printMessage(content, w, count);
+
+            try self.cio.send(content);
+        }
+        try self.cio.send(prot.Content{ .a = null });
+        if (self.env.log.level(1)) |w| {
+            try w.print("Sent all missing Content\n", .{});
+            try w.flush();
+        }
+    }
+
+    // Run
+    if (self.maybe_cmd) |cmd| {
+        var run = prot.Run.init(self.env.a);
+        defer run.deinit();
+        run.cmd = try run.a.dupe(u8, cmd);
+        for (self.args) |arg|
+            try run.args.append(self.env.a, try run.a.dupe(u8, arg));
+
+        try self.cio.send(run);
+        if (self.env.log.level(1)) |w| {
+            try w.print("Sent Run command\n", .{});
+            try w.flush();
+        }
+
+        while (true) {
+            var output = prot.Output.init(self.env.a);
+            defer output.deinit();
+            var done = prot.Done{};
+            if (try self.cio.receive2(&output, &done)) {
+                if (self.env.log.level(1)) |w|
+                    prot.printMessage(output, w, null);
+            } else {
+                if (self.env.log.level(1)) |w|
+                    prot.printMessage(done, w, null);
+                break;
+            }
+        }
+        if (self.env.log.level(1)) |w| {
+            try w.print("Received all output from Run command\n", .{});
+            try w.flush();
+        }
+
+        // Collect
+        {
+            try self.cio.send(prot.Collect{});
+        }
+    }
+
+    // Hangup
+    try self.cio.send(bye);
+}
+
+pub fn runServer(self: *Self) !void {
+    var bye = prot.Bye.init(self.env.a);
+    defer bye.deinit();
+
+    // Handshake
+    {
+        var hello: prot.Hello = undefined;
+        if (try self.cio.receive2(&hello, &bye)) {
+            if (self.env.log.level(1)) |w|
+                prot.printMessage(hello, w, null);
+            if (hello.version != prot.My.version) {
+                try bye.setReason("Version mismatch: mine {} !=  peer {}", .{ prot.My.version, hello.version });
+                try self.cio.send(bye);
+                return Error.VersionMismatch;
+            }
+            try self.cio.send(prot.Hello{ .role = .Client, .status = .Ok });
+        } else {
+            if (self.env.log.level(1)) |w|
+                prot.printMessage(bye, w, null);
+            return Error.PeerGaveUp;
+        }
+    }
+
+    // Sync
+    {
+        var aa = std.heap.ArenaAllocator.init(self.env.a);
+        defer aa.deinit();
+        const a = aa.allocator();
+
+        var sync = prot.Sync.init(a);
+
+        if (!try self.cio.receive(&sync))
+            return Error.ExpectedSync;
+        if (self.env.log.level(1)) |w|
+            prot.printMessage(sync, w, null);
+
+        var filestates = tree.FileStates{};
+        var missings = std.ArrayList(u64){};
+        while (true) {
+            var filestate = prot.FileState.init(a);
+            if (!try self.cio.receive(&filestate))
+                return Error.ExpectedFileState;
+
+            if (self.env.log.level(1)) |w|
+                prot.printMessage(filestate, w, filestates.items.len);
+
+            const id = filestate.id orelse break;
+
+            try filestates.append(a, filestate);
+
+            const checksum = filestate.checksum orelse return Error.ExpectedChecksum;
+            if (!self.store.hasFile(checksum)) {
+                // Indicate we do not have this file
+                try missings.append(a, id);
+            }
+        }
+        if (self.env.log.level(1)) |w| {
+            try w.print("Received {} FileStates, I miss {}\n", .{ filestates.items.len, missings.items.len });
+            try w.flush();
+        }
+
+        for (missings.items) |id| {
+            try self.cio.send(prot.Missing{ .id = id });
+        }
+        try self.cio.send(prot.Missing{ .id = null });
+        if (self.env.log.level(1)) |w| {
+            try w.print("Sent all Missings\n", .{});
+            try w.flush();
+        }
+
+        for (0..std.math.maxInt(usize)) |count| {
+            var content = prot.Content{ .a = a };
+            if (!try self.cio.receive(&content))
+                return Error.ExpectedContent;
+
+            if (self.env.log.level(1)) |w|
+                prot.printMessage(content, w, count);
+
+            if (content.id == null)
+                break;
+
+            const str = content.str orelse return Error.ExpectedString;
+            try self.store.addFile(crypto.checksum(str), str);
+        }
+        if (self.env.log.level(1)) |w| {
+            try w.print("Received all content\n", .{});
+            try w.flush();
+        }
+
+        try self.doSync(sync, filestates);
+    }
+
+    // Run
+    {
+        var aa = std.heap.ArenaAllocator.init(self.env.a);
+        defer aa.deinit();
+
+        var run = prot.Run.init(aa.allocator());
+
+        if (try self.cio.receive(&run)) {
+            if (self.env.log.level(1)) |w|
+                prot.printMessage(run, w, null);
+            try self.doRun(run);
+
+            // Collect
+            var collect = prot.Collect{};
+            if (try self.cio.receive(&collect)) {}
+        }
+    }
+
+    // Hangup
+    if (try self.cio.receive(&bye)) {
+        if (self.env.log.level(1)) |w|
+            prot.printMessage(bye, w, null);
+    }
+}
+
+fn doSync(self: *Self, sync: prot.Sync, filestates: tree.FileStates) !void {
+    const subdir = sync.subdir orelse return Error.SyncToRootNotSupportedYet;
+
+    if (subdir.len == 0)
+        return Error.EmptyBaseFolder;
+    if (std.fs.path.isAbsolute(subdir))
+        return Error.OnlyRelativePathAllowed;
+    if (sync.reset and rubr.fs.isDirectory(subdir)) {
+        if (self.env.log.level(1)) |w| {
+            try w.print("Deleting {s}\n", .{subdir});
+            try w.flush();
+        }
+        std.fs.cwd().deleteTree(subdir) catch {};
+    }
+    if (self.env.log.level(1)) |w|
+        try w.print("Creating subdir {s}\n", .{subdir});
+
+    // Store subdir folder for prot.Run
+    if (self.subdir != null)
+        return Error.BaseAlreadySet;
+
+    const subdir_dir = try std.fs.cwd().makeOpenPath(subdir, .{});
+    self.subdir = subdir_dir;
+
+    const D = struct {
+        const D = @This();
+
+        folder: std.fs.Dir,
+        path: []const u8 = &.{},
+        dir: ?std.fs.Dir = null,
+
+        fn deinit(d: *D) void {
+            d.close();
+        }
+        fn set(d: *D, wanted_path: []const u8) !void {
+            if (std.mem.eql(u8, wanted_path, d.path))
+                return;
+            d.close();
+            d.path = wanted_path;
+            if (d.path.len > 0)
+                d.dir = try d.folder.makeOpenPath(d.path, .{});
+        }
+        fn get(d: D) std.fs.Dir {
+            return d.dir orelse d.folder;
+        }
+        fn close(d: *D) void {
+            if (d.dir) |*dd| {
+                dd.close();
+                d.dir = null;
+                d.path = &.{};
+            }
+        }
+    };
+    var d = D{ .folder = subdir_dir };
+    defer d.deinit();
+
+    if (self.env.log.level(1)) |w| {
+        try w.print("Reconstructing the Tree...\n", .{});
+        try w.flush();
+    }
+    var tmp = std.ArrayList(u8){};
+    defer tmp.deinit(self.env.a);
+    var extract_count: u64 = 0;
+    for (filestates.items) |file| {
+        const checksum = file.checksum orelse return Error.ExpectedChecksum;
+        const path = file.path orelse "";
+
+        try d.set(path);
+
+        var do_extract: bool = true;
+        if (!sync.reset) {
+            if (d.get().openFile(file.name, .{ .mode = .read_only })) |f| {
+                defer f.close();
+
+                const stat = try f.stat();
+                try tmp.resize(self.env.a, stat.size);
+                const readcount = try f.read(tmp.items);
+                if (readcount == stat.size) {
+                    const cs = crypto.checksum(tmp.items);
+                    if (std.mem.eql(u8, &cs, &checksum))
+                        do_extract = false;
+                }
+            } else |_| {
+                if (self.env.log.level(1)) |w|
+                    try w.print("\tCould not find {s}\n", .{file.name});
+            }
+        }
+
+        if (do_extract) {
+            if (self.env.log.level(1)) |w| {
+                if (extract_count % 1000 == 0) {
+                    try w.print("\tExtracting {}\t{s}/{s}\n", .{ extract_count, path, file.name });
+                    try w.flush();
+                }
+                extract_count += 1;
+            }
+            if (!try self.store.extractFile(checksum, d.get(), file.name, file.attributes)) {
+                try self.env.log.err("Could not extract file '{s}'\n", .{file.name});
+                return Error.CouldNotExtractFile;
+            }
+        }
+    }
+    if (self.env.log.level(1)) |w| {
+        try w.print("done\n", .{});
+        try w.flush();
+    }
+}
+
+fn doRun(self: *Self, run: prot.Run) !void {
+    var argv = std.ArrayList([]const u8){};
+    defer argv.deinit(self.env.a);
+
+    try argv.append(self.env.a, run.cmd);
+    for (run.args.items) |arg|
+        try argv.append(self.env.a, arg);
+
+    var proc = std.process.Child.init(argv.items, self.env.a);
+
+    // &todo: This might not work for Windows yet: https://github.com/ziglang/zig/issues/5190
+    const folder = self.subdir orelse return Error.BaseNotSet;
+    proc.cwd_dir = folder;
+
+    proc.stdout_behavior = .Pipe;
+    proc.stderr_behavior = .Pipe;
+
+    try proc.spawn();
+
+    {
+        // Reading data from stdout/stderr crossplatform nonblocking seems most easy using MT
+        self.maybe_stdout = proc.stdout;
+        self.maybe_stderr = proc.stderr;
+        var thread_stdout = try std.Thread.spawn(.{}, processOutputStdout, .{self});
+        defer thread_stdout.join();
+        var thread_stderr = try std.Thread.spawn(.{}, processOutputStderr, .{self});
+        defer thread_stderr.join();
+    }
+
+    const term = try proc.wait();
+    if (self.env.log.level(1)) |w|
+        try w.print("term: {}\n", .{term});
+
+    var done = prot.Done{};
+    switch (term) {
+        .Exited => |v| done.exit = v,
+        .Signal => |v| done.signal = v,
+        .Stopped => |v| done.stop = v,
+        .Unknown => |v| done.unknown = v,
+    }
+    try self.cio.send(done);
+}
+
+const OutputKind = enum { stdout, stderr };
+fn processOutputStdout(self: *Self) !void {
+    try self.processOutput_(&self.maybe_stdout, .stdout);
+}
+fn processOutputStderr(self: *Self) !void {
+    try self.processOutput_(&self.maybe_stderr, .stderr);
+}
+fn processOutput_(self: *Self, maybe_output: *?std.fs.File, kind: OutputKind) !void {
+    var buf: [1024]u8 = undefined;
+    if (maybe_output.*) |output| {
+        var b: [1024]u8 = undefined;
+        var reader = output.reader(self.env.io, &b);
+        while (true) {
+            const n = try reader.interface.readSliceShort(&buf);
+            if (n > 0) {
+                if (self.env.log.level(1)) |w|
+                    try w.print("output: {} {}=>({s})\n", .{ kind, n, buf[0..n] });
+
+                var outp = prot.Output.init(self.env.a);
+                defer outp.deinit();
+                switch (kind) {
+                    .stdout => outp.stdout = try outp.a.dupe(u8, buf[0..n]),
+                    .stderr => outp.stderr = try outp.a.dupe(u8, buf[0..n]),
+                }
+
+                {
+                    self.mutex.lock();
+                    defer self.mutex.unlock();
+                    try self.cio.send(outp);
+                }
+            }
+            if (n < buf.len) {
+                // End of file
+                maybe_output.* = null;
+                break;
+            }
+        }
+    }
+}

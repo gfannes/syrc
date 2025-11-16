@@ -1,4 +1,4 @@
-// Output from `rake export[walker,cli,Log,profile,naft,util,comm,pipe,fs,fmt,Env]` from https://github.com/gfannes/rubr from 2025-11-13
+// Output from `rake export[walker,cli,Log,profile,naft,util,comm,pipe,fs,fmt,Env]` from https://github.com/gfannes/rubr from 2025-11-16
 
 const std = @import("std");
 
@@ -1751,6 +1751,10 @@ pub const fs = struct {
         std.mem.copyForwards(u8, path[start..], part);
     
         return path;
+    }
+    
+    pub fn cwdPathAlloc(a: std.mem.Allocator, maybe_part: ?[]const u8) ![]u8 {
+        return try std.fs.cwd().realpathAlloc(a, maybe_part orelse ".");
     }
     
     pub fn isDirectory(path: []const u8) bool {

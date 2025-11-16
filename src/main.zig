@@ -24,7 +24,7 @@ pub fn main() !void {
     try cli_args.parse();
 
     if (cli_args.print_help) {
-        cli_args.printHelp();
+        try cli_args.printHelp();
         return;
     }
 
@@ -32,15 +32,7 @@ pub fn main() !void {
 
     var my_app = app.App.init(
         env,
-        cli_args.mode,
-        cli_args.ip,
-        cli_args.port,
-        cli_args.base,
-        cli_args.reset,
-        cli_args.cleanup,
-        cli_args.src,
-        cli_args.store_path,
-        cli_args.extra.items,
+        cli_args,
     );
     defer my_app.deinit();
 
