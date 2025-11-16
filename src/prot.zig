@@ -14,6 +14,7 @@ pub const Error = error{
     ExpectedFd,
     ExpectedRc,
     ExpectedCount,
+    ExpectedFlag,
     ReasonAlreadySet,
     NoAllocatorSet,
     WrongChecksumSize,
@@ -67,8 +68,9 @@ pub const Sync = struct {
 
     a: std.mem.Allocator,
     subdir: ?[]const u8 = null,
-    reset: bool = false,
-    cleanup: bool = false,
+    reset_folder: bool = false,
+    cleanup_folder: bool = false,
+    reset_store: bool = false,
 
     pub fn init(a: std.mem.Allocator) Self {
         return Self{ .a = a };
@@ -83,26 +85,31 @@ pub const Sync = struct {
         defer node.deinit();
         if (self.subdir) |subdir|
             node.attr("base", subdir);
-        node.attr("reset", self.reset);
-        node.attr("cleanup", self.cleanup);
+        node.attr("reset_folder", self.reset_folder);
+        node.attr("cleanup_folder", self.cleanup_folder);
+        node.attr("reset_store", self.reset_store);
     }
 
     pub fn writeComposite(self: Self, tw: anytype) !void {
         if (self.subdir) |subdir|
             try tw.writeLeaf(subdir, 3);
-        try tw.writeLeaf(self.reset, 5);
-        try tw.writeLeaf(self.cleanup, 7);
+        try tw.writeLeaf(self.reset_folder, 5);
+        try tw.writeLeaf(self.cleanup_folder, 7);
+        try tw.writeLeaf(self.reset_store, 9);
     }
     pub fn readComposite(self: *Self, tr: anytype) !void {
         var subdir: []const u8 = &.{};
         if (try tr.readLeaf(&subdir, 3, self.a))
             self.subdir = subdir;
 
-        if (!try tr.readLeaf(&self.reset, 5, {}))
-            return Error.ExpectedString;
+        if (!try tr.readLeaf(&self.reset_folder, 5, {}))
+            return Error.ExpectedFlag;
 
-        if (!try tr.readLeaf(&self.cleanup, 7, {}))
-            return Error.ExpectedString;
+        if (!try tr.readLeaf(&self.cleanup_folder, 7, {}))
+            return Error.ExpectedFlag;
+
+        if (!try tr.readLeaf(&self.reset_store, 9, {}))
+            return Error.ExpectedFlag;
     }
 };
 

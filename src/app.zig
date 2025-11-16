@@ -73,7 +73,18 @@ pub const App = struct {
 
         client.setRunCommand(self.args.extra.items);
 
-        var client_thread = try std.Thread.spawn(.{}, comm.Session.runClient, .{ &client.session, self.args.name, self.args.reset, self.args.cleanup });
+        var client_thread = try std.Thread.spawn(
+            .{},
+            comm.Session.runClient,
+            .{
+                &client.session,
+                self.args.name,
+                self.args.reset_folder,
+                self.args.cleanup_folder,
+                self.args.reset_store,
+                self.args.collect,
+            },
+        );
         defer client_thread.join();
     }
 
@@ -103,14 +114,17 @@ pub const App = struct {
 
         client.setRunCommand(self.args.extra.items);
 
-        try client.session.runClient(self.args.name, self.args.reset, self.args.cleanup);
+        try client.session.runClient(
+            self.args.name,
+            self.args.reset_folder,
+            self.args.cleanup_folder,
+            self.args.reset_store,
+            self.args.collect,
+        );
     }
 
     fn runCheck(self: *Self) !void {
-        var src_dir = try std.fs.openDirAbsolute(self.args.base, .{});
-        defer src_dir.close();
-
-        var tree = try fs.collectTree(self.env, src_dir);
+        var tree = try fs.collectTree(self.env, self.args.base);
         defer tree.deinit();
 
         const file = try std.fs.cwd().createFile("filestates.csv", .{});

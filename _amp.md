@@ -5,10 +5,6 @@
 - [x] Rework comm to use `std.Io.Reader/Writer` iso generic
 	- Add `flush()` where necessary
 - Copy data from netstream directly to file iso buffer
-- Create `copy` mode
-	- Create tree state and use this to duplicate the tree
-		- Optional export to file and import from file
-	- [ ] Support running commands
 - [x] Fix running in fast mode wrt Error.ExpectedChecksum
 	- Issue was incorrect setup of `?[32]u8`
 - [x] Support running rake commands in non-git copy of root-all
@@ -25,8 +21,8 @@
 	- Main use case is a large tree with just a few updates
 		- Send FileState during discovery
 		- Do not send Missing/Content while still receiving FileStates
-- [/] Implement Collect
-- [ ] Support for reusing an existing tree without removal
+- [x] Implement Collect
+- [x] Support for reusing an existing tree without removal
 - Reuse object files by moving the cache outside of core/build/cache/cook
 - [ ] Create tree state
 	- [x] List all files
@@ -41,7 +37,7 @@
 			- Is this faster MT?
 		- Compute checksum
 			- Is this faster MT?
-- [*] Support cleanup blob.Store
+- [x] Support cleanup blob.Store
 - [x] Integrate Store into runTest()
 	- [x] Create in rubr.fs.homeDir()/.config/syrc
 	- [x] Use [32]u8 iso [64]u8 as Key in Store: couple with crypto.Checksum

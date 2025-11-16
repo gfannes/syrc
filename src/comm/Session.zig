@@ -19,7 +19,7 @@ pub const Error = error{
     ExpectedFileState,
     ExpectedString,
     ExpectedContent,
-    EmptyBaseFolder,
+    EmptySubdir,
     BaseAlreadySet,
     BaseNotSet,
     UnknownId,
@@ -33,14 +33,13 @@ pub const Error = error{
 
 env: Env,
 store: *blob.Store,
-folder: []const u8,
+base: []const u8,
 
 stream: ?std.Io.net.Stream = null,
 cio: Io = undefined,
 maybe_cmd: ?[]const u8 = null,
 args: []const []const u8 = &.{},
 
-subdir: ?std.fs.Dir = null,
 maybe_stdout: ?std.fs.File = null,
 maybe_stderr: ?std.fs.File = null,
 mutex: std.Thread.Mutex = .{},
@@ -53,11 +52,9 @@ pub fn init(self: *Self, stream: std.Io.net.Stream) !void {
 pub fn deinit(self: *Self) void {
     if (self.stream) |*stream|
         stream.close(self.env.io);
-    if (self.subdir) |*subdir|
-        subdir.close();
 }
 
-pub fn runClient(self: *Self, name: ?[]const u8, reset: bool, cleanup: bool) !void {
+pub fn runClient(self: *Self, name: ?[]const u8, reset_folder: bool, cleanup_folder: bool, reset_store: bool, collect: bool) !void {
     var bye = prot.Bye.init(self.env.a);
     defer bye.deinit();
 
@@ -86,74 +83,17 @@ pub fn runClient(self: *Self, name: ?[]const u8, reset: bool, cleanup: bool) !vo
         var sync = prot.Sync.init(self.env.a);
         defer sync.deinit();
 
-        var folder_dir = try std.fs.openDirAbsolute(self.folder, .{});
-        defer folder_dir.close();
-
         if (name) |str|
             sync.subdir = try sync.a.dupe(u8, str);
-        sync.reset = reset;
-        sync.cleanup = cleanup;
+        sync.reset_folder = reset_folder;
+        sync.cleanup_folder = cleanup_folder;
+        sync.reset_store = reset_store;
         if (self.env.log.level(1)) |w|
             prot.printMessage(sync, w, null);
+
         try self.cio.send(sync);
 
-        var tree = try fs.collectTree(self.env, folder_dir);
-        defer tree.deinit();
-
-        {
-            for (tree.filestates.items, 0..) |filestate, count| {
-                if (self.env.log.level(1)) |w|
-                    prot.printMessage(filestate, w, count);
-
-                try self.cio.send(filestate);
-            }
-
-            // Indicate we sent all FileStates
-            const sentinel = prot.FileState.init(self.env.a);
-            try self.cio.send(sentinel);
-
-            if (self.env.log.level(1)) |w| {
-                try w.print("Sent all FileStates\n", .{});
-                try w.flush();
-            }
-        }
-
-        var missings = std.ArrayList(usize){};
-        defer missings.deinit(self.env.a);
-        for (0..std.math.maxInt(usize)) |count| {
-            var missing = prot.Missing{};
-            if (try self.cio.receive(&missing)) {
-                if (self.env.log.level(1)) |w|
-                    prot.printMessage(missing, w, count);
-
-                if (missing.id) |id| {
-                    try missings.append(self.env.a, id);
-                } else {
-                    // Peer has all the data
-                    break;
-                }
-            }
-        }
-        if (self.env.log.level(1)) |w| {
-            try w.print("Server misses {} files\n", .{missings.items.len});
-            try w.flush();
-        }
-
-        for (missings.items, 0..) |id, count| {
-            var content = prot.Content{ .a = null, .id = id };
-
-            content.str = try tree.getContent(id);
-
-            if (self.env.log.level(1)) |w|
-                prot.printMessage(content, w, count);
-
-            try self.cio.send(content);
-        }
-        try self.cio.send(prot.Content{ .a = null });
-        if (self.env.log.level(1)) |w| {
-            try w.print("Sent all missing Content\n", .{});
-            try w.flush();
-        }
+        try self.sendFolderToPeer(self.base);
     }
 
     // Run
@@ -189,8 +129,14 @@ pub fn runClient(self: *Self, name: ?[]const u8, reset: bool, cleanup: bool) !vo
         }
 
         // Collect
-        {
-            try self.cio.send(prot.Collect{});
+        if (collect) {
+            const clt = prot.Collect{};
+            if (self.env.log.level(1)) |w|
+                prot.printMessage(clt, w, null);
+
+            try self.cio.send(clt);
+
+            try self.receiveFolderFromPeer(self.env.a, self.base, false);
         }
     }
 
@@ -222,6 +168,8 @@ pub fn runServer(self: *Self) !void {
     }
 
     // Sync
+    var folder: []const u8 = &.{};
+    defer self.env.a.free(folder);
     {
         var aa = std.heap.ArenaAllocator.init(self.env.a);
         defer aa.deinit();
@@ -234,63 +182,23 @@ pub fn runServer(self: *Self) !void {
         if (self.env.log.level(1)) |w|
             prot.printMessage(sync, w, null);
 
-        var tree = fs.Tree{ .env = self.env };
-        tree.env.a = a;
-        defer tree.deinit();
-
-        var missings = std.ArrayList(u64){};
-        while (true) {
-            var filestate = prot.FileState.init(a);
-            if (!try self.cio.receive(&filestate))
-                return Error.ExpectedFileState;
-
-            if (self.env.log.level(1)) |w|
-                prot.printMessage(filestate, w, tree.filestates.items.len);
-
-            const id = filestate.id orelse break;
-
-            try tree.filestates.append(a, filestate);
-
-            const checksum = filestate.checksum orelse return Error.ExpectedChecksum;
-            if (!self.store.hasFile(checksum)) {
-                // Indicate we do not have this file
-                try missings.append(a, id);
-            }
-        }
-        if (self.env.log.level(1)) |w| {
-            try w.print("Received {} FileStates, I miss {}\n", .{ tree.filestates.items.len, missings.items.len });
-            try w.flush();
+        if (sync.reset_store) {
+            try self.env.log.warning("Resetting the store\n", .{});
+            try self.store.reset();
         }
 
-        for (missings.items) |id| {
-            try self.cio.send(prot.Missing{ .id = id });
+        {
+            const subdir = sync.subdir orelse return Error.SyncToRootNotSupportedYet;
+            if (subdir.len == 0)
+                return Error.EmptySubdir;
+            if (std.fs.path.isAbsolute(subdir))
+                return Error.OnlyRelativePathAllowed;
+
+            folder = try std.fs.path.join(self.env.a, &[_][]const u8{ self.base, subdir });
+            try self.env.log.print("folder: '{s}'\n", .{folder});
+
+            try self.receiveFolderFromPeer(a, folder, sync.reset_folder);
         }
-        try self.cio.send(prot.Missing{ .id = null });
-        if (self.env.log.level(1)) |w| {
-            try w.print("Sent all Missings\n", .{});
-            try w.flush();
-        }
-
-        for (0..std.math.maxInt(usize)) |count| {
-            var content = prot.Content{ .a = a };
-            if (!try self.cio.receive(&content))
-                return Error.ExpectedContent;
-
-            if (self.env.log.level(1)) |w|
-                prot.printMessage(content, w, count);
-
-            if (content.id == null)
-                break;
-
-            const str = content.str orelse return Error.ExpectedString;
-            try self.store.addFile(crypto.checksum(str), str);
-        }
-        if (self.env.log.level(1)) |w| {
-            try w.print("Received all content\n", .{});
-            try w.flush();
-        }
-
-        try self.doSync(sync, tree);
     }
 
     // Run
@@ -303,11 +211,17 @@ pub fn runServer(self: *Self) !void {
         if (try self.cio.receive(&run)) {
             if (self.env.log.level(1)) |w|
                 prot.printMessage(run, w, null);
-            try self.doRun(run);
+
+            try self.doRun(run, folder);
 
             // Collect
             var collect = prot.Collect{};
-            if (try self.cio.receive(&collect)) {}
+            if (try self.cio.receive(&collect)) {
+                if (self.env.log.level(1)) |w|
+                    prot.printMessage(collect, w, null);
+
+                try self.sendFolderToPeer(folder);
+            }
         }
     }
 
@@ -318,30 +232,17 @@ pub fn runServer(self: *Self) !void {
     }
 }
 
-fn doSync(self: *Self, sync: prot.Sync, tree: fs.Tree) !void {
-    const subdir = sync.subdir orelse return Error.SyncToRootNotSupportedYet;
-
-    if (subdir.len == 0)
-        return Error.EmptyBaseFolder;
-    if (std.fs.path.isAbsolute(subdir))
-        return Error.OnlyRelativePathAllowed;
-    if (sync.reset and rubr.fs.isDirectory(subdir)) {
+fn doSync(self: *Self, folder: []const u8, reset: bool, tree: fs.Tree) !void {
+    // Delete `folder` if necessary
+    if (reset) {
         if (self.env.log.level(1)) |w| {
-            try w.print("Deleting {s}\n", .{subdir});
+            try w.print("Deleting {s}\n", .{folder});
             try w.flush();
         }
-        std.fs.cwd().deleteTree(subdir) catch {};
+        std.fs.cwd().deleteTree(folder) catch {};
     }
-    if (self.env.log.level(1)) |w|
-        try w.print("Creating subdir {s}\n", .{subdir});
 
-    // Store subdir folder for prot.Run
-    if (self.subdir != null)
-        return Error.BaseAlreadySet;
-
-    const subdir_dir = try std.fs.cwd().makeOpenPath(subdir, .{});
-    self.subdir = subdir_dir;
-
+    // Helper to keep track of a subpath that is already open
     const D = struct {
         const D = @This();
 
@@ -371,7 +272,12 @@ fn doSync(self: *Self, sync: prot.Sync, tree: fs.Tree) !void {
             }
         }
     };
-    var d = D{ .folder = subdir_dir };
+
+    if (self.env.log.level(1)) |w| {
+        const oper = if (rubr.fs.isDirectory(folder)) "Opening" else "Creating";
+        try w.print("{s} folder {s}\n", .{ oper, folder });
+    }
+    var d = D{ .folder = try std.fs.cwd().makeOpenPath(folder, .{}) };
     defer d.deinit();
 
     if (self.env.log.level(1)) |w| {
@@ -388,7 +294,7 @@ fn doSync(self: *Self, sync: prot.Sync, tree: fs.Tree) !void {
         try d.set(path);
 
         var do_extract: bool = true;
-        if (!sync.reset) {
+        if (!reset) {
             if (d.get().openFile(file.name, .{ .mode = .read_only })) |f| {
                 defer f.close();
 
@@ -426,7 +332,7 @@ fn doSync(self: *Self, sync: prot.Sync, tree: fs.Tree) !void {
     }
 }
 
-fn doRun(self: *Self, run: prot.Run) !void {
+fn doRun(self: *Self, run: prot.Run, folder: []const u8) !void {
     var argv = std.ArrayList([]const u8){};
     defer argv.deinit(self.env.a);
 
@@ -437,8 +343,10 @@ fn doRun(self: *Self, run: prot.Run) !void {
     var proc = std.process.Child.init(argv.items, self.env.a);
 
     // &todo: This might not work for Windows yet: https://github.com/ziglang/zig/issues/5190
-    const folder = self.subdir orelse return Error.BaseNotSet;
-    proc.cwd_dir = folder;
+    try self.env.log.print("folder2: '{s}'\n", .{folder});
+    var folder_dir = try std.fs.openDirAbsolute(folder, .{});
+    defer folder_dir.close();
+    proc.cwd_dir = folder_dir;
 
     proc.stdout_behavior = .Pipe;
     proc.stderr_behavior = .Pipe;
@@ -507,4 +415,142 @@ fn processOutput_(self: *Self, maybe_output: *?std.fs.File, kind: OutputKind) !v
             }
         }
     }
+}
+
+fn sendFolderToPeer(self: *Self, folder: []const u8) !void {
+    // Collect all FileStates for this folder
+    var tree = try fs.collectTree(self.env, folder);
+    defer tree.deinit();
+
+    // Send all FileStates
+    {
+        for (tree.filestates.items, 0..) |filestate, count| {
+            if (self.env.log.level(1)) |w|
+                prot.printMessage(filestate, w, count);
+
+            try self.cio.send(filestate);
+        }
+
+        // Indicate we sent all FileStates
+        const sentinel = prot.FileState.init(self.env.a);
+        try self.cio.send(sentinel);
+
+        if (self.env.log.level(1)) |w| {
+            try w.print("Sent all {} FileStates\n", .{tree.filestates.items.len});
+            try w.flush();
+        }
+    }
+
+    // Read all the Missing data
+    var missings = std.ArrayList(usize){};
+    defer missings.deinit(self.env.a);
+    for (0..std.math.maxInt(usize)) |count| {
+        var missing = prot.Missing{};
+        if (try self.cio.receive(&missing)) {
+            if (self.env.log.level(1)) |w|
+                prot.printMessage(missing, w, count);
+
+            if (missing.id) |id| {
+                try missings.append(self.env.a, id);
+            } else {
+                // Peer has all the data
+                break;
+            }
+        }
+    }
+    if (self.env.log.level(1)) |w| {
+        try w.print("Server misses {} files\n", .{missings.items.len});
+        try w.flush();
+    }
+
+    // Send all the missing Content
+    for (missings.items, 0..) |id, count| {
+        var content = prot.Content{ .a = null, .id = id };
+
+        content.str = try tree.getContent(id);
+
+        if (self.env.log.level(1)) |w|
+            prot.printMessage(content, w, count);
+
+        try self.cio.send(content);
+    }
+    try self.cio.send(prot.Content{ .a = null });
+    if (self.env.log.level(1)) |w| {
+        try w.print("Sent all missing Content\n", .{});
+        try w.flush();
+    }
+}
+
+fn receiveFolderFromPeer(self: *Self, a: std.mem.Allocator, folder: []const u8, reset: bool) !void {
+    var tree = fs.Tree{ .env = self.env };
+    tree.env.a = a;
+    defer tree.deinit();
+
+    // Receive all the FileStates of the Tree we have to recreate into folder
+    // We compute the missing data immediately
+    var missings = std.ArrayList(u64){};
+    defer missings.deinit(a);
+    {
+        while (true) {
+            var filestate = prot.FileState.init(a);
+            if (!try self.cio.receive(&filestate))
+                return Error.ExpectedFileState;
+
+            if (self.env.log.level(1)) |w|
+                prot.printMessage(filestate, w, tree.filestates.items.len);
+
+            const id = filestate.id orelse break;
+
+            try tree.filestates.append(a, filestate);
+
+            const checksum = filestate.checksum orelse return Error.ExpectedChecksum;
+            if (!self.store.hasFile(checksum)) {
+                // Indicate we do not have this file
+                try missings.append(a, id);
+            }
+        }
+        if (self.env.log.level(1)) |w| {
+            try w.print("Received {} FileStates, I miss {}\n", .{ tree.filestates.items.len, missings.items.len });
+            try w.flush();
+        }
+    }
+
+    // Indicate the content we are Missing
+    {
+        for (missings.items) |id| {
+            try self.cio.send(prot.Missing{ .id = id });
+        }
+        try self.cio.send(prot.Missing{ .id = null });
+        if (self.env.log.level(1)) |w| {
+            try w.print("Sent all Missings\n", .{});
+            try w.flush();
+        }
+    }
+
+    // Receive the missing Content
+    {
+        for (0..std.math.maxInt(usize)) |count| {
+            var content = prot.Content{ .a = a };
+            defer content.deinit();
+
+            if (!try self.cio.receive(&content))
+                return Error.ExpectedContent;
+
+            if (self.env.log.level(1)) |w|
+                prot.printMessage(content, w, count);
+
+            if (content.id == null)
+                break;
+
+            const str = content.str orelse return Error.ExpectedString;
+            try self.store.addFile(crypto.checksum(str), str);
+        }
+        if (self.env.log.level(1)) |w| {
+            try w.print("Received all content\n", .{});
+            try w.flush();
+        }
+    }
+
+    // Recreate the folder
+    try self.doSync(folder, reset, tree);
 }

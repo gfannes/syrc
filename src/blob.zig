@@ -136,6 +136,16 @@ pub const Store = struct {
 
         return true;
     }
+
+    pub fn reset(self: *Self) !void {
+        const dir = self.dir orelse return Error.ExpectedDir;
+
+        for (0..256) |i| {
+            const byte: u8 = @intCast(i);
+            const subdir = std.fmt.hex(byte);
+            dir.deleteTree(&subdir) catch {};
+        }
+    }
 };
 
 test "blob.Store" {

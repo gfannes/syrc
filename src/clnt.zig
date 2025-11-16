@@ -32,7 +32,7 @@ pub const Client = struct {
 
         var stream = try self.address.connect(self.env.io, .{ .mode = .stream });
         errdefer stream.close();
-        self.session = comm.Session{ .env = self.env, .folder = folder, .store = store };
+        self.session = comm.Session{ .env = self.env, .base = folder, .store = store };
         try self.session.init(stream);
     }
     pub fn deinit(self: *Self) void {

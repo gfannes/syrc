@@ -43,7 +43,7 @@ pub const Server = struct {
         var session = comm.Session{
             .env = self.env,
             .store = self.store,
-            .folder = self.folder,
+            .base = self.folder,
         };
         defer session.deinit();
 

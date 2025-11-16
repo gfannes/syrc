@@ -31,7 +31,7 @@ pub const Tree = struct {
     }
 };
 
-pub fn collectTree(env: Env, dir: std.fs.Dir) !Tree {
+pub fn collectTree(env: Env, folder: []const u8) !Tree {
     const Collector = struct {
         const My = @This();
         const Buffer = std.ArrayList(u8);
@@ -49,6 +49,7 @@ pub fn collectTree(env: Env, dir: std.fs.Dir) !Tree {
             my.walker.deinit();
             if (my.buffer) |*buf|
                 buf.deinit(my.env.a);
+            my.dir.close();
         }
 
         fn collect(my: *My) !void {
@@ -115,7 +116,7 @@ pub fn collectTree(env: Env, dir: std.fs.Dir) !Tree {
 
     var collector = Collector{
         .env = env,
-        .dir = dir,
+        .dir = try std.fs.openDirAbsolute(folder, .{}),
         .filestates = &res.filestates,
         .walker = rubr.walker.Walker{ .env = env },
     };
