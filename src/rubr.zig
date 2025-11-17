@@ -1,6 +1,7 @@
-// Output from `rake export[walker,cli,Log,profile,naft,util,comm,pipe,fs,fmt,Env]` from https://github.com/gfannes/rubr from 2025-11-16
+// Output from `rake export[walker,cli,Log,profile,naft,util,comm,pipe,fs,fmt,Env]` from https://github.com/gfannes/rubr from 2025-11-17
 
 const std = @import("std");
+const builtin = @import("builtin");
 
 // Export from 'src/walker.zig'
 pub const walker = struct {
@@ -1720,37 +1721,16 @@ pub const fs = struct {
         }
     };
     
-    pub fn homeDirAlloc(a: std.mem.Allocator, maybe_part: ?[]const u8) ![]u8 {
+    pub fn homePathAlloc(a: std.mem.Allocator, maybe_part: ?[]const u8) ![]u8 {
         // &todo: Support Windows
         var home_buf: [std.fs.max_path_bytes]u8 = undefined;
         var fba = std.heap.FixedBufferAllocator.init(&home_buf);
-        const home = try std.process.getEnvVarOwned(fba.allocator(), "HOME");
+        const name = if (builtin.os.tag == .windows) "USERPROFILE" else "HOME";
+        const home = try std.process.getEnvVarOwned(fba.allocator(), name);
         return if (maybe_part) |part|
             try std.mem.concat(a, u8, &[_][]const u8{ home, "/", part })
         else
             try a.dupe(u8, home);
-    }
-    
-    pub fn homePath(part: []const u8, buf: []u8) ![]const u8 {
-        var path: []u8 = buf;
-    
-        {
-            var fba = std.heap.FixedBufferAllocator.init(buf);
-            const home = try std.process.getEnvVarOwned(fba.allocator(), "HOME");
-            path.len = home.len;
-            @memmove(path, home);
-        }
-    
-        if (path.len + 1 > buf.len) return Error.BufferTooSmall;
-        path.len += 1;
-        path[path.len - 1] = '/';
-    
-        if (path.len + part.len > buf.len) return Error.BufferTooSmall;
-        const start = path.len;
-        path.len += part.len;
-        std.mem.copyForwards(u8, path[start..], part);
-    
-        return path;
     }
     
     pub fn cwdPathAlloc(a: std.mem.Allocator, maybe_part: ?[]const u8) ![]u8 {

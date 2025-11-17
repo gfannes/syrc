@@ -112,7 +112,7 @@ pub const Args = struct {
             self.base = try rubr.fs.cwdPathAlloc(self.env.aa, part);
         }
         if (!std.fs.path.isAbsolute(self.store_path)) {
-            self.store_path = try rubr.fs.homeDirAlloc(self.env.aa, self.store_path);
+            self.store_path = try rubr.fs.homePathAlloc(self.env.aa, self.store_path);
             if (self.env.log.level(1)) |w|
                 try w.print("Store will be stored in '{s}'\n", .{self.store_path});
         }
