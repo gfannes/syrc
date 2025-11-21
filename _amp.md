@@ -12,6 +12,10 @@
 	- Reworked existing .gitignore files
 - [x] Export CSV with collected file info to reduce loaded file sizes
 - [x] Print output in client
+- [*] Emit stdout/stderr on actual stdout/stderr
+	- Extra logging only in verbose=2
+- [*] Support multiple connections from server
+- [*] Use default mode client
 - [*] Reduce 10GB data that is loaded for root-all
 	- Remove `cli/espcap_ahp/qc/scenario_espcap_v2/auro-440/bianca/FhG_src_drop_renderers_v1.0.0_20180828_0bfbf8ce.zip`
 	- Many `.wav` files
