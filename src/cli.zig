@@ -31,12 +31,12 @@ pub const Args = struct {
 
     exe_name: []const u8 = &.{},
     print_help: bool = false,
-    verbose: usize = 1,
+    verbose: usize = 0,
     base: []const u8 = &.{},
     name: []const u8 = Default.name,
     ip: []const u8 = Default.ip,
     port: u16 = Default.port,
-    mode: Mode = Mode.Test,
+    mode: Mode = Mode.Client,
     j: usize = 0,
     reset_folder: bool = false,
     cleanup_folder: bool = false,
@@ -119,19 +119,19 @@ pub const Args = struct {
     }
 
     pub fn printHelp(self: Self) !void {
-        std.debug.print("Help for {s}\n", .{self.exe_name});
-        std.debug.print("    -h/--help                      Print this help\n", .{});
-        std.debug.print("    -v/--verbose         LEVEL     Verbosity level\n", .{});
-        std.debug.print("    -j/--jobs            NUMBER    Number of threads to use [optional, default is {}]\n", .{self.j});
-        std.debug.print("    -b/--base            FOLDER    Base folder to use [optional, default is '{s}']\n", .{try rubr.fs.cwdPathAlloc(self.env.aa, null)});
-        std.debug.print("    -n/--name            NAME      Name to use [optional, default is '{s}']\n", .{Default.name});
-        std.debug.print("    -r/--reset-folder              Force a reset of the base destination folder [optional, default is 'no']\n", .{});
-        std.debug.print("    -R/--reset-store               Force a reset of peer's store [optional, default is 'no']\n", .{});
-        std.debug.print("    -c/--collect                   Collect the server state back [optional, default is 'no']\n", .{});
-        std.debug.print("    -a/--ip              ADDRESS   Ip address [optional, default is {s}]\n", .{Default.ip});
-        std.debug.print("    -p/--port            PORT      Port to use [optional, default is {}]\n", .{Default.port});
-        std.debug.print("    -m/--mode            MODE      Operation mode: 'client', 'server', 'check' and 'test'\n", .{});
-        std.debug.print("    -s/--store           FOLDER    Folder for blob store [optional, default is $HOME/{s}]\n", .{Default.store_dir});
-        std.debug.print("Developed by Geert Fannes.\n", .{});
+        try self.env.stdout.print("Help for {s}\n", .{self.exe_name});
+        try self.env.stdout.print("    -h/--help                      Print this help\n", .{});
+        try self.env.stdout.print("    -v/--verbose         LEVEL     Verbosity level\n", .{});
+        try self.env.stdout.print("    -j/--jobs            NUMBER    Number of threads to use [optional, default is {}]\n", .{self.j});
+        try self.env.stdout.print("    -b/--base            FOLDER    Base folder to use [optional, default is '{s}']\n", .{try rubr.fs.cwdPathAlloc(self.env.aa, null)});
+        try self.env.stdout.print("    -n/--name            NAME      Name to use [optional, default is '{s}']\n", .{Default.name});
+        try self.env.stdout.print("    -r/--reset-folder              Force a reset of the base destination folder [optional, default is 'no']\n", .{});
+        try self.env.stdout.print("    -R/--reset-store               Force a reset of peer's store [optional, default is 'no']\n", .{});
+        try self.env.stdout.print("    -c/--collect                   Collect the server state back [optional, default is 'no']\n", .{});
+        try self.env.stdout.print("    -a/--ip              ADDRESS   Ip address [optional, default is {s}]\n", .{Default.ip});
+        try self.env.stdout.print("    -p/--port            PORT      Port to use [optional, default is {}]\n", .{Default.port});
+        try self.env.stdout.print("    -m/--mode            MODE      Operation mode: 'client', 'server', 'check' and 'test'\n", .{});
+        try self.env.stdout.print("    -s/--store           FOLDER    Folder for blob store [optional, default is $HOME/{s}]\n", .{Default.store_dir});
+        try self.env.stdout.print("Developed by Geert Fannes.\n", .{});
     }
 };

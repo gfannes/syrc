@@ -6,14 +6,14 @@ const rubr = @import("rubr.zig");
 const Env = rubr.Env;
 
 pub fn main() !void {
-    const s = rubr.profile.Scope.init(.A);
-    defer s.deinit();
-
     var env_inst = Env.Instance{};
     env_inst.init();
     defer env_inst.deinit();
 
     var env = env_inst.env();
+
+    const s = rubr.profile.Scope.init(.A, env.stdout);
+    defer s.deinit();
 
     var config = cfg.Config.init(env.a);
     defer config.deinit();

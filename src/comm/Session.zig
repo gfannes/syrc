@@ -46,7 +46,8 @@ mutex: std.Thread.Mutex = .{},
 
 pub fn init(self: *Self, stream: std.Io.net.Stream) !void {
     self.stream = stream;
-    self.cio.init(self.env.io, stream);
+    self.cio = Io{ .env = self.env };
+    self.cio.init(stream);
 }
 
 pub fn deinit(self: *Self) void {
@@ -110,13 +111,33 @@ pub fn runClient(self: *Self, name: ?[]const u8, reset_folder: bool, cleanup_fol
             try w.flush();
         }
 
+        var maybe_stdout: ?bool = null;
         while (true) {
             var output = prot.Output.init(self.env.a);
             defer output.deinit();
             var done = prot.Done{};
             if (try self.cio.receive2(&output, &done)) {
-                if (self.env.log.level(1)) |w|
+                if (self.env.log.level(2)) |w|
                     prot.printMessage(output, w, null);
+
+                if (output.stdout) |str| {
+                    const is_stdout = maybe_stdout orelse false;
+                    if (!is_stdout)
+                        try self.env.stdout.writeAll("\u{1f7e2}");
+                    maybe_stdout = true;
+
+                    try self.env.stdout.writeAll(str);
+                    try self.env.stdout.flush();
+                }
+                if (output.stderr) |str| {
+                    const is_stdout = maybe_stdout orelse true;
+                    if (is_stdout)
+                        try self.env.stderr.writeAll("\u{1f534}");
+                    maybe_stdout = false;
+
+                    try self.env.stderr.writeAll(str);
+                    try self.env.stderr.flush();
+                }
             } else {
                 if (self.env.log.level(1)) |w|
                     prot.printMessage(done, w, null);
@@ -195,7 +216,6 @@ pub fn runServer(self: *Self) !void {
                 return Error.OnlyRelativePathAllowed;
 
             folder = try std.fs.path.join(self.env.a, &[_][]const u8{ self.base, subdir });
-            try self.env.log.print("folder: '{s}'\n", .{folder});
 
             try self.receiveFolderFromPeer(a, folder, sync.reset_folder);
         }
@@ -343,7 +363,6 @@ fn doRun(self: *Self, run: prot.Run, folder: []const u8) !void {
     var proc = std.process.Child.init(argv.items, self.env.a);
 
     // &todo: This might not work for Windows yet: https://github.com/ziglang/zig/issues/5190
-    try self.env.log.print("folder2: '{s}'\n", .{folder});
     var folder_dir = try std.fs.openDirAbsolute(folder, .{});
     defer folder_dir.close();
     proc.cwd_dir = folder_dir;

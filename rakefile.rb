@@ -11,8 +11,8 @@ end
 desc 'Install'
 task :install do
     # mode = :safe
-    mode = :fast
-    # mode = :debug
+    # mode = :fast
+    mode = :debug
 
     m = { safe: :safe, fast: :fast }[mode]
     mode_str = m ? "--release=#{m}" : ''
@@ -23,7 +23,7 @@ end
 desc 'Run all UTs'
 task :ut, %i[filter] do |_task, args|
     filter = (args[:filter] || '').split(':').map { |e| "-Dtest-filter=#{e}" } * ' '
-    sh('clear')
+    # sh('clear')
     sh("zig build test #{filter}")
 end
 

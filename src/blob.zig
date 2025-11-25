@@ -177,5 +177,8 @@ test "blob.Store" {
     try store.addFile(key, "Hello Store");
     try ut.expect(store.hasFile(key));
 
-    try ut.expect(try store.extractFile(key, "myfile.txt"));
+    var dst_dir = try std.fs.cwd().makeOpenPath("tmp/repro", .{});
+    defer dst_dir.close();
+
+    try ut.expect(try store.extractFile(key, dst_dir, "myfile.txt", null));
 }

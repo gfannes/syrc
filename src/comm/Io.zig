@@ -11,6 +11,8 @@ const Self = @This();
 const TreeReader = rubr.comm.TreeReader;
 const TreeWriter = rubr.comm.TreeWriter;
 
+env: rubr.Env,
+
 readbuf: [1024]u8 = undefined,
 writebuf: [1024]u8 = undefined,
 
@@ -20,9 +22,9 @@ writer: std.Io.net.Stream.Writer = undefined,
 tr: TreeReader = undefined,
 tw: TreeWriter = undefined,
 
-pub fn init(self: *Self, io: std.Io, stream: std.Io.net.Stream) void {
-    self.reader = stream.reader(io, &self.readbuf);
-    self.writer = stream.writer(io, &self.writebuf);
+pub fn init(self: *Self, stream: std.Io.net.Stream) void {
+    self.reader = stream.reader(self.env.io, &self.readbuf);
+    self.writer = stream.writer(self.env.io, &self.writebuf);
     self.tr = TreeReader{ .in = &self.reader.interface };
     self.tw = TreeWriter{ .out = &self.writer.interface };
 }
@@ -69,7 +71,7 @@ pub fn receive2(self: *Self, ok: anytype, ko: anytype) !bool {
             return false;
         },
         else => {
-            std.debug.print("Expected Id {} or {} but received {}\n", .{ OkId, KoId, header.id });
+            try self.env.stderr.print("Expected Id {} or {} but received {}\n", .{ OkId, KoId, header.id });
             return Error.ReceivedSomethingElse;
         },
     }

@@ -1,4 +1,4 @@
-// Output from `rake export[walker,cli,Log,profile,naft,util,comm,pipe,fs,fmt,Env]` from https://github.com/gfannes/rubr from 2025-11-17
+// Output from `rake export[walker,cli,Log,profile,naft,util,comm,pipe,fs,fmt,Env]` from https://github.com/gfannes/rubr from 2025-11-21
 
 const std = @import("std");
 const builtin = @import("builtin");
@@ -319,16 +319,34 @@ pub const Env = struct {
     
     log: *const Log = undefined,
     
+    stdout: *std.Io.Writer = undefined,
+    stderr: *std.Io.Writer = undefined,
+    
     pub const Instance = struct {
         const Self = @This();
         const GPA = std.heap.GeneralPurposeAllocator(.{});
         const AA = std.heap.ArenaAllocator;
+        const StdIO = struct {
+            stdout_writer: std.fs.File.Writer = undefined,
+            stderr_writer: std.fs.File.Writer = undefined,
+            stdout_buffer: [4096]u8 = undefined,
+            stderr_buffer: [4096]u8 = undefined,
+            fn init(self: *@This()) void {
+                self.stdout_writer = std.fs.File.stdout().writer(&self.stdout_buffer);
+                self.stderr_writer = std.fs.File.stderr().writer(&self.stderr_buffer);
+            }
+            fn deinit(self: *@This()) void {
+                self.stdout_writer.interface.flush() catch {};
+                self.stderr_writer.interface.flush() catch {};
+            }
+        };
     
         log: Log = undefined,
         gpa: GPA = undefined,
         aa: AA = undefined,
         io: std.Io.Threaded = undefined,
         maybe_start: ?std.time.Instant = null,
+        stdio: StdIO = undefined,
     
         pub fn init(self: *Self) void {
             self.log = Log{};
@@ -337,8 +355,10 @@ pub const Env = struct {
             self.aa = AA.init(self.gpa.allocator());
             self.io = std.Io.Threaded.init(self.gpa.allocator());
             self.maybe_start = std.time.Instant.now() catch null;
+            self.stdio.init();
         }
         pub fn deinit(self: *Self) void {
+            self.stdio.deinit();
             self.io.deinit();
             self.aa.deinit();
             if (self.gpa.deinit() == .leak) {
@@ -348,7 +368,14 @@ pub const Env = struct {
         }
     
         pub fn env(self: *Self) Env_ {
-            return .{ .a = self.gpa.allocator(), .aa = self.aa.allocator(), .io = self.io.io(), .log = &self.log };
+            return .{
+                .a = self.gpa.allocator(),
+                .aa = self.aa.allocator(),
+                .io = self.io.io(),
+                .log = &self.log,
+                .stdout = &self.stdio.stdout_writer.interface,
+                .stderr = &self.stdio.stderr_writer.interface,
+            };
         }
     
         pub fn duration_ns(self: Self) u64 {
@@ -362,6 +389,7 @@ pub const Env = struct {
         const inst: *const Instance = @fieldParentPtr("log", env.log);
         return inst.duration_ns();
     }
+    
 };
 
 // Export from 'src/strng.zig'
@@ -741,10 +769,8 @@ pub const Log = struct {
         self.initWriter();
     }
     pub fn deinit(self: *Self) void {
-        std.debug.print("Log.deinit()\n", .{});
         self.closeWriter() catch {};
         if (self._autoclean) |autoclean| {
-            std.debug.print("Removing '{s}'\n", .{autoclean.filepath});
             std.fs.deleteFileAbsolute(autoclean.filepath) catch {};
         }
     }
@@ -793,7 +819,6 @@ pub const Log = struct {
                 std.mem.copyForwards(u8, fp, filepath_clean);
                 if (self._autoclean) |*autoclean| {
                     autoclean.filepath = fp;
-                    std.debug.print("Setup autoclean for '{s}'\n", .{autoclean.filepath});
                 }
             }
         } else {
@@ -926,16 +951,18 @@ pub const profile = struct {
     
         id: Id,
         start: std.time.Instant,
+        w: *std.Io.Writer,
     
-        pub fn init(id: Id) Scope {
-            return Scope{ .id = id, .start = Self.now() };
+        pub fn init(id: Id, w: *std.Io.Writer) Scope {
+            return Scope{ .id = id, .start = Self.now(), .w = w };
         }
         pub fn deinit(self: Self) void {
             const elapse = now().since(self.start);
             measurements[@intFromEnum(self.id)].max = elapse;
             const a = @divFloor(elapse, 1_000_000_000);
             const b = elapse - a * 1_000_000_000;
-            std.debug.print("elapse: {}.{:0>9.9}s\n", .{ a, @as(u64, @intCast(b)) });
+            self.w.print("elapse: {}.{:0>9.9}s\n", .{ a, @as(u64, @intCast(b)) }) catch {};
+            self.w.flush() catch {};
         }
     
         fn now() std.time.Instant {
