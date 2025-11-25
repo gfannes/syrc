@@ -307,7 +307,14 @@ fn doSync(self: *Self, folder: []const u8, reset: bool, tree: fs.Tree) !void {
     var tmp = std.ArrayList(u8){};
     defer tmp.deinit(self.env.a);
     var extract_count: u64 = 0;
-    for (tree.filestates.items) |file| {
+    for (tree.filestates.items, 0..) |file, count| {
+        if (self.env.log.level(1)) |w| {
+            if (@popCount(count) <= 1) {
+                try w.print("\t{}: extracted {}\n", .{ count, extract_count });
+                try w.flush();
+            }
+        }
+
         const checksum = file.checksum orelse return Error.ExpectedChecksum;
         const path = file.path orelse "";
 
@@ -333,17 +340,11 @@ fn doSync(self: *Self, folder: []const u8, reset: bool, tree: fs.Tree) !void {
         }
 
         if (do_extract) {
-            if (self.env.log.level(1)) |w| {
-                if (extract_count % 1000 == 0) {
-                    try w.print("\tExtracting {}\t{s}/{s}\n", .{ extract_count, path, file.name });
-                    try w.flush();
-                }
-                extract_count += 1;
-            }
             if (!try self.store.extractFile(checksum, d.get(), file.name, file.attributes)) {
                 try self.env.log.err("Could not extract file '{s}'\n", .{file.name});
                 return Error.CouldNotExtractFile;
             }
+            extract_count += 1;
         }
     }
     if (self.env.log.level(1)) |w| {

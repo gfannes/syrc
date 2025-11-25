@@ -36,7 +36,7 @@ pub const Server = struct {
         var server = self.server orelse return Error.ExpectedListeningServer;
 
         if (self.env.log.level(1)) |w| {
-            try w.print("Waiting for connection...\n", .{});
+            try w.print("\nWaiting for connection...\n", .{});
             try w.flush();
         }
 
