@@ -99,8 +99,9 @@ pub const App = struct {
         try server.init();
 
         while (true) {
-            try server.processOne();
-            // break;
+            server.processOne() catch |err| {
+                try self.env.log.err("Session failed: {any}\n", .{err});
+            };
         }
     }
 
