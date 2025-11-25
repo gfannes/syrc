@@ -15,6 +15,7 @@
 - [x] Emit stdout/stderr on actual stdout/stderr
 	- [x] Extra logging only in verbose=2
 - [x] Use default mode client
+- [*] Indicate stdout/stderr in Session.processOutput_()
 - [*] Support multiple connections from server
 - [*] Reduce 10GB data that is loaded for root-all
 	- Remove `cli/espcap_ahp/qc/scenario_espcap_v2/auro-440/bianca/FhG_src_drop_renderers_v1.0.0_20180828_0bfbf8ce.zip`

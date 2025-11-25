@@ -111,32 +111,25 @@ pub fn runClient(self: *Self, name: ?[]const u8, reset_folder: bool, cleanup_fol
             try w.flush();
         }
 
-        var maybe_stdout: ?bool = null;
+        var output_indicator = Output.Indicator{};
         while (true) {
             var output = prot.Output.init(self.env.a);
             defer output.deinit();
             var done = prot.Done{};
             if (try self.cio.receive2(&output, &done)) {
-                if (self.env.log.level(2)) |w|
+                if (self.env.log.level(2)) |w| {
                     prot.printMessage(output, w, null);
-
-                if (output.stdout) |str| {
-                    const is_stdout = maybe_stdout orelse false;
-                    if (!is_stdout)
-                        try self.env.stdout.writeAll("\u{1f7e2}");
-                    maybe_stdout = true;
-
-                    try self.env.stdout.writeAll(str);
-                    try self.env.stdout.flush();
-                }
-                if (output.stderr) |str| {
-                    const is_stdout = maybe_stdout orelse true;
-                    if (is_stdout)
-                        try self.env.stderr.writeAll("\u{1f534}");
-                    maybe_stdout = false;
-
-                    try self.env.stderr.writeAll(str);
-                    try self.env.stderr.flush();
+                } else {
+                    if (output.stdout) |str| {
+                        try output_indicator.set(.stdout, self.env.stdout, self.env.stderr);
+                        try self.env.stdout.writeAll(str);
+                        try self.env.stdout.flush();
+                    }
+                    if (output.stderr) |str| {
+                        try output_indicator.set(.stderr, self.env.stdout, self.env.stderr);
+                        try self.env.stderr.writeAll(str);
+                        try self.env.stderr.flush();
+                    }
                 }
             } else {
                 if (self.env.log.level(1)) |w|
@@ -397,23 +390,26 @@ fn doRun(self: *Self, run: prot.Run, folder: []const u8) !void {
     try self.cio.send(done);
 }
 
-const OutputKind = enum { stdout, stderr };
 fn processOutputStdout(self: *Self) !void {
     try self.processOutput_(&self.maybe_stdout, .stdout);
 }
 fn processOutputStderr(self: *Self) !void {
     try self.processOutput_(&self.maybe_stderr, .stderr);
 }
-fn processOutput_(self: *Self, maybe_output: *?std.fs.File, kind: OutputKind) !void {
+fn processOutput_(self: *Self, maybe_output: *?std.fs.File, kind: Output.Kind) !void {
     var buf: [1024]u8 = undefined;
     if (maybe_output.*) |output| {
         var b: [1024]u8 = undefined;
         var reader = output.reader(self.env.io, &b);
+        var output_indicator = Output.Indicator{};
         while (true) {
             const n = try reader.interface.readSliceShort(&buf);
             if (n > 0) {
-                if (self.env.log.level(1)) |w|
-                    try w.print("output: {} {}=>({s})\n", .{ kind, n, buf[0..n] });
+                if (self.env.log.level(1)) |w| {
+                    try output_indicator.set(kind, w, w);
+                    try w.print("{s}", .{buf[0..n]});
+                    try w.flush();
+                }
 
                 var outp = prot.Output.init(self.env.a);
                 defer outp.deinit();
@@ -574,3 +570,21 @@ fn receiveFolderFromPeer(self: *Self, a: std.mem.Allocator, folder: []const u8, 
     // Recreate the folder
     try self.doSync(folder, reset, tree);
 }
+
+const Output = struct {
+    const Kind = enum { stdout, stderr };
+    const Indicator = struct {
+        maybe_kind: ?Kind = null,
+
+        fn set(self: *@This(), kind: Kind, outw: *std.Io.Writer, errw: *std.Io.Writer) !void {
+            if (self.maybe_kind == kind)
+                return;
+
+            switch (kind) {
+                .stdout => try outw.writeAll("\u{1f7e2}"),
+                .stderr => try errw.writeAll("\u{1f534}"),
+            }
+            self.maybe_kind = kind;
+        }
+    };
+};
