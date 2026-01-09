@@ -1,4 +1,4 @@
-// Output from `rake export[walker,cli,Log,profile,naft,util,comm,pipe,fs,fmt,Env]` from https://github.com/gfannes/rubr from 2025-11-21
+// Output from `rake export[walker,cli,Log,profile,naft,util,comm,pipe,fs,fmt,Env]` from https://github.com/gfannes/rubr from 2026-01-09
 
 const std = @import("std");
 const builtin = @import("builtin");
@@ -28,7 +28,7 @@ pub const walker = struct {
         filter: Filter = .{},
     
         // We keep track of the current path as a []const u8. If the caller has to do this,
-        // he has to use Dir.realpath() which is less efficient.
+        // he has to use Dir.realPath() which is less efficient.
         buffer: [std.fs.max_path_bytes]u8 = undefined,
         path: []const u8 = &.{},
         base: usize = undefined,
@@ -46,16 +46,17 @@ pub const walker = struct {
         }
     
         // cb() is passed:
-        // - dir: std.fs.Dir
+        // - dir: std.Io.Dir
         // - path: full path of file/folder
         // - offsets: optional offsets for basename and filename. Only for the toplevel Enter/Leave is this null to avoid out of bound reading
         // - kind: Enter/Leave/File
-        pub fn walk(self: *Walker, basedir: std.fs.Dir, cb: anytype) !void {
-            self.path = try basedir.realpath(".", &self.buffer);
+        pub fn walk(self: *Walker, basedir: std.Io.Dir, cb: anytype) !void {
+            const len = try basedir.realPathFile(self.env.io, ".", &self.buffer);
+            self.path = self.buffer[0..len];
             self.base = self.path.len + 1;
     
-            var dir = try basedir.openDir(".", .{ .iterate = true });
-            defer dir.close();
+            var dir = try basedir.openDir(self.env.io, ".", .{ .iterate = true });
+            defer dir.close(self.env.io);
     
             const path = self.path;
     
@@ -64,13 +65,13 @@ pub const walker = struct {
             try cb.call(dir, path, null, Kind.Leave);
         }
     
-        fn _walk(self: *Walker, dir: std.fs.Dir, cb: anytype) !void {
+        fn _walk(self: *Walker, dir: std.Io.Dir, cb: anytype) !void {
             var added_ignore = false;
     
-            if (dir.openFile(".gitignore", .{})) |file| {
-                defer file.close();
+            if (dir.openFile(self.env.io, ".gitignore", .{})) |file| {
+                defer file.close(self.env.io);
     
-                const stat = try file.stat();
+                const stat = try file.stat(self.env.io);
     
                 var ig = Ignore{ .buffer = try Buffer.initCapacity(self.env.a, stat.size) };
                 try ig.buffer.resize(self.env.a, stat.size);
@@ -88,7 +89,7 @@ pub const walker = struct {
             } else |_| {}
     
             var it = dir.iterate();
-            while (try it.next()) |el| {
+            while (try it.next(self.env.io)) |el| {
                 if (!self.filter.call(dir, el))
                     continue;
     
@@ -99,7 +100,7 @@ pub const walker = struct {
                 self._append_to_path(el.name);
     
                 switch (el.kind) {
-                    std.fs.File.Kind.file => {
+                    std.Io.File.Kind.file => {
                         if (slc.last(self.ignore_stack.items)) |e| {
                             const ignore_path = self.path[self.ignore_offset..];
                             if (e.ignore.match(ignore_path))
@@ -108,15 +109,15 @@ pub const walker = struct {
     
                         try cb.call(dir, self.path, offsets, Kind.File);
                     },
-                    std.fs.File.Kind.directory => {
+                    std.Io.File.Kind.directory => {
                         if (slc.last(self.ignore_stack.items)) |e| {
                             const ignore_path = self.path[self.ignore_offset..];
                             if (e.ignore.match(ignore_path))
                                 continue;
                         }
     
-                        var subdir = try dir.openDir(el.name, .{ .iterate = true });
-                        defer subdir.close();
+                        var subdir = try dir.openDir(self.env.io, el.name, .{ .iterate = true });
+                        defer subdir.close(self.env.io);
     
                         const path = self.path;
     
@@ -157,7 +158,7 @@ pub const walker = struct {
         // Skip files with following extensions. Include '.' in extension.
         extensions: []const []const u8 = &.{},
     
-        fn call(self: Filter, _: std.fs.Dir, entry: std.fs.Dir.Entry) bool {
+        fn call(self: Filter, _: std.Io.Dir, entry: std.Io.Dir.Entry) bool {
             if (self.hidden and is_hidden(entry.name))
                 return false;
     
@@ -199,7 +200,7 @@ pub const walker = struct {
                 }
             }
         
-            pub fn initFromFile(dir: std.fs.Dir, name: []const u8, a: std.mem.Allocator) !Self {
+            pub fn initFromFile(dir: std.Io.Dir, name: []const u8, a: std.mem.Allocator) !Self {
                 const file = try dir.openFile(name, .{});
                 defer file.close();
         
@@ -316,6 +317,7 @@ pub const Env = struct {
     aa: std.mem.Allocator = undefined,
     
     io: std.Io = undefined,
+    envmap: *const std.process.Environ.Map = undefined,
     
     log: *const Log = undefined,
     
@@ -327,13 +329,13 @@ pub const Env = struct {
         const GPA = std.heap.GeneralPurposeAllocator(.{});
         const AA = std.heap.ArenaAllocator;
         const StdIO = struct {
-            stdout_writer: std.fs.File.Writer = undefined,
-            stderr_writer: std.fs.File.Writer = undefined,
+            stdout_writer: std.Io.File.Writer = undefined,
+            stderr_writer: std.Io.File.Writer = undefined,
             stdout_buffer: [4096]u8 = undefined,
             stderr_buffer: [4096]u8 = undefined,
-            fn init(self: *@This()) void {
-                self.stdout_writer = std.fs.File.stdout().writer(&self.stdout_buffer);
-                self.stderr_writer = std.fs.File.stderr().writer(&self.stderr_buffer);
+            fn init(self: *@This(), io: std.Io) void {
+                self.stdout_writer = std.Io.File.stdout().writer(io, &self.stdout_buffer);
+                self.stderr_writer = std.Io.File.stderr().writer(io, &self.stderr_buffer);
             }
             fn deinit(self: *@This()) void {
                 self.stdout_writer.interface.flush() catch {};
@@ -341,6 +343,8 @@ pub const Env = struct {
             }
         };
     
+        environ: std.process.Environ = std.process.Environ.empty,
+        envmap: std.process.Environ.Map = undefined,
         log: Log = undefined,
         gpa: GPA = undefined,
         aa: AA = undefined,
@@ -349,22 +353,26 @@ pub const Env = struct {
         stdio: StdIO = undefined,
     
         pub fn init(self: *Self) void {
-            self.log = Log{};
-            self.log.init();
             self.gpa = GPA{};
-            self.aa = AA.init(self.gpa.allocator());
-            self.io = std.Io.Threaded.init(self.gpa.allocator());
+            const a = self.gpa.allocator();
+            self.envmap = self.environ.createMap(a) catch std.process.Environ.Map.init(a);
+            self.aa = AA.init(a);
+            self.io = std.Io.Threaded.init(a, .{ .environ = self.environ });
+            const io = self.io.io();
+            self.log = Log{ .io = io };
+            self.log.init();
             self.maybe_start = std.time.Instant.now() catch null;
-            self.stdio.init();
+            self.stdio.init(io);
         }
         pub fn deinit(self: *Self) void {
             self.stdio.deinit();
+            self.log.deinit();
             self.io.deinit();
             self.aa.deinit();
+            self.envmap.deinit();
             if (self.gpa.deinit() == .leak) {
                 self.log.err("Found memory leaks in Env\n", .{}) catch {};
             }
-            self.log.deinit();
         }
     
         pub fn env(self: *Self) Env_ {
@@ -372,6 +380,7 @@ pub const Env = struct {
                 .a = self.gpa.allocator(),
                 .aa = self.aa.allocator(),
                 .io = self.io.io(),
+                .envmap = &self.envmap,
                 .log = &self.log,
                 .stdout = &self.stdio.stdout_writer.interface,
                 .stderr = &self.stdio.stderr_writer.interface,
@@ -525,6 +534,37 @@ pub const strng = struct {
                 return v;
             }
             return null;
+        }
+    
+        pub fn popIntMaxCount(self: *Self, T: type, max_count: usize) ?T {
+            // Find number of chars comprising number
+            const count = @min(max_count, self.content.len);
+            var slice = self.content[0..count];
+            for (slice, 0..) |ch, ix| {
+                switch (ch) {
+                    '0'...'9' => {},
+                    '-', '+' => if (ix > 0) {
+                        slice.len = ix;
+                        break;
+                    },
+                    else => {
+                        slice.len = ix;
+                        break;
+                    },
+                }
+            }
+            if (std.fmt.parseInt(T, slice, 10) catch null) |v| {
+                self._popFront(slice.len);
+                return v;
+            }
+            return null;
+        }
+    
+        pub fn popFront(self: *Self, count: usize) ?[]const u8 {
+            if (self.content.len < count)
+                return null;
+            defer self._popFront(count);
+            return self.content[0..count];
         }
     
         fn _popFront(self: *Self, count: usize) void {
@@ -752,11 +792,13 @@ pub const Log = struct {
         filepath: []const u8 = &.{},
     };
     
+    io: std.Io,
+    
     _do_close: bool = false,
-    _file: std.fs.File = undefined,
+    _file: std.Io.File = undefined,
     
     _buffer: [1024]u8 = undefined,
-    _writer: std.fs.File.Writer = undefined,
+    _writer: std.Io.File.Writer = undefined,
     
     _io: *std.Io.Writer = undefined,
     
@@ -765,13 +807,13 @@ pub const Log = struct {
     _autoclean: ?Autoclean = null,
     
     pub fn init(self: *Self) void {
-        self._file = std.fs.File.stdout();
+        self._file = std.Io.File.stdout();
         self.initWriter();
     }
     pub fn deinit(self: *Self) void {
         self.closeWriter() catch {};
         if (self._autoclean) |autoclean| {
-            std.fs.deleteFileAbsolute(autoclean.filepath) catch {};
+            std.Io.Dir.deleteFileAbsolute(self.io, autoclean.filepath) catch {};
         }
     }
     
@@ -812,7 +854,7 @@ pub const Log = struct {
         };
     
         if (std.fs.path.isAbsolute(filepath_clean)) {
-            self._file = try std.fs.createFileAbsolute(filepath_clean, .{});
+            self._file = try std.Io.Dir.createFileAbsolute(self.io, filepath_clean, .{});
             if (options.autoclean) {
                 self._autoclean = undefined;
                 const fp = self._autoclean.?.buffer[0..filepath_clean.len];
@@ -822,7 +864,7 @@ pub const Log = struct {
                 }
             }
         } else {
-            self._file = try std.fs.cwd().createFile(filepath_clean, .{});
+            self._file = try std.Io.Dir.cwd().createFile(self.io, filepath_clean, .{});
         }
         self._do_close = true;
     
@@ -858,13 +900,13 @@ pub const Log = struct {
     }
     
     fn initWriter(self: *Self) void {
-        self._writer = self._file.writer(&self._buffer);
+        self._writer = self._file.writer(self.io, &self._buffer);
         self._io = &self._writer.interface;
     }
     fn closeWriter(self: *Self) !void {
         try self._io.flush();
         if (self._do_close) {
-            self._file.close();
+            self._file.close(self.io);
             self._do_close = false;
         }
     }
@@ -880,16 +922,16 @@ pub const cli = struct {
         env: Env,
         argv: [][]const u8 = &.{},
     
-        pub fn setupFromOS(self: *Self) !void {
+        pub fn setupFromOS(self: *Self, os_args: std.process.Args) !void {
             const a = self.env.aa;
     
-            const os_argv = try std.process.argsAlloc(a);
-            defer std.process.argsFree(a, os_argv);
+            self.argv = try a.alloc([]const u8, os_args.vector.len);
     
-            self.argv = try a.alloc([]const u8, os_argv.len);
-    
-            for (os_argv, 0..) |str, ix| {
-                self.argv[ix] = try a.dupe(u8, str);
+            var it = os_args.iterate();
+            var ix: usize = 0;
+            while (it.next()) |os_arg| {
+                self.argv[ix] = try a.dupe(u8, os_arg);
+                ix += 1;
             }
         }
         pub fn setupFromData(self: *Self, argv: []const []const u8) !void {
@@ -981,15 +1023,16 @@ pub const naft = struct {
     pub const Node = struct {
         const Self = @This();
     
-        io: ?*std.Io.Writer,
-        level: usize,
+        w: ?*std.Io.Writer,
+    
+        level: usize = 0,
         // Indicates if this Node already contains nested elements (Text, Node). This is used to add a closing '}' upon deinit().
         has_block: bool = false,
         // Indicates if this Node already contains a Node. This is used for deciding newlines etc.
         has_node: bool = false,
     
-        pub fn init(io: ?*std.Io.Writer) Node {
-            return Node{ .io = io, .level = 0, .has_block = true, .has_node = true };
+        pub fn root(w: ?*std.Io.Writer) Node {
+            return .{ .w = w, .has_block = true };
         }
         pub fn deinit(self: Self) void {
             if (self.level == 0)
@@ -1007,9 +1050,16 @@ pub const naft = struct {
     
         pub fn node(self: *Self, name: []const u8) Node {
             self.ensure_block(true);
-            const n = Node{ .io = self.io, .level = self.level + 1 };
+            const n = Node{ .w = self.w, .level = self.level + 1 };
             n.indent();
             n.print("[{s}]", .{name});
+            return n;
+        }
+        pub fn node2(self: *Self, name: []const u8, name2: []const u8) Node {
+            self.ensure_block(true);
+            const n = Node{ .w = self.w, .level = self.level + 1 };
+            n.indent();
+            n.print("[{s}:{s}]", .{ name, name2 });
             return n;
         }
     
@@ -1068,7 +1118,7 @@ pub const naft = struct {
         }
     
         fn print(self: Self, comptime fmtstr: []const u8, args: anytype) void {
-            if (self.io) |io| {
+            if (self.w) |io| {
                 io.print(fmtstr, args) catch {};
                 io.flush() catch {};
             } else {
@@ -1707,6 +1757,7 @@ pub const pipe = struct {
 pub const fs = struct {
     pub const Error = error{
         BufferTooSmall,
+        CouldNotFindHome,
     };
     
     pub const Path = struct {
@@ -1748,36 +1799,34 @@ pub const fs = struct {
         }
     };
     
-    pub fn homePathAlloc(a: std.mem.Allocator, maybe_part: ?[]const u8) ![]u8 {
-        // &todo: Support Windows
-        var home_buf: [std.fs.max_path_bytes]u8 = undefined;
-        var fba = std.heap.FixedBufferAllocator.init(&home_buf);
+    pub fn homePathAlloc(env: Env, maybe_part: ?[]const u8) ![]u8 {
         const name = if (builtin.os.tag == .windows) "USERPROFILE" else "HOME";
-        const home = try std.process.getEnvVarOwned(fba.allocator(), name);
+        const home = env.envmap.get(name) orelse return error.CouldNotFindHome;
         return if (maybe_part) |part|
-            try std.mem.concat(a, u8, &[_][]const u8{ home, "/", part })
+            try std.mem.concat(env.a, u8, &[_][]const u8{ home, "/", part })
         else
-            try a.dupe(u8, home);
+            try env.a.dupe(u8, home);
     }
     
-    pub fn cwdPathAlloc(a: std.mem.Allocator, maybe_part: ?[]const u8) ![]u8 {
-        return try std.fs.cwd().realpathAlloc(a, maybe_part orelse ".");
+    pub fn cwdPathAlloc(io: std.Io, a: std.mem.Allocator, maybe_part: ?[]const u8) ![]u8 {
+        return try std.Io.Dir.cwd().realPathFileAlloc(io, maybe_part orelse ".", a);
     }
     
-    pub fn isDirectory(path: []const u8) bool {
+    pub fn isDirectory(io: std.Io, path: []const u8) bool {
         const err_dir =
             if (std.fs.path.isAbsolute(path))
-                std.fs.openDirAbsolute(path, .{})
+                std.Io.Dir.openDirAbsolute(io, path, .{})
             else
-                std.fs.cwd().openDir(path, .{});
+                std.Io.Dir.cwd().openDir(io, path, .{});
         return if (err_dir) |_| true else |_| false;
     }
     
-    pub fn deleteTree(path: []const u8) !void {
-        if (std.fs.path.isAbsolute(path))
-            try std.fs.deleteTreeAbsolute(path)
-        else
-            try std.fs.cwd().deleteTree(path);
+    pub fn deleteTree(io: std.Io, path: []const u8) !void {
+        if (std.fs.path.isAbsolute(path)) {
+            var dir = try std.Io.Dir.openDirAbsolute(io, path, .{});
+            defer dir.close(io);
+            try dir.deleteTree(io, ".");
+        } else try std.Io.Dir.cwd().deleteTree(io, path);
     }
     
 };

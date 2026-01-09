@@ -40,8 +40,8 @@ cio: Io = undefined,
 maybe_cmd: ?[]const u8 = null,
 args: []const []const u8 = &.{},
 
-maybe_stdout: ?std.fs.File = null,
-maybe_stderr: ?std.fs.File = null,
+maybe_stdout: ?std.Io.File = null,
+maybe_stderr: ?std.Io.File = null,
 mutex: std.Thread.Mutex = .{},
 
 pub fn init(self: *Self, stream: std.Io.net.Stream) !void {
@@ -252,16 +252,17 @@ fn doSync(self: *Self, folder: []const u8, reset: bool, tree: fs.Tree) !void {
             try w.print("Deleting {s}\n", .{folder});
             try w.flush();
         }
-        std.fs.cwd().deleteTree(folder) catch {};
+        std.Io.Dir.cwd().deleteTree(self.env.io, folder) catch {};
     }
 
     // Helper to keep track of a subpath that is already open
     const D = struct {
         const D = @This();
 
-        folder: std.fs.Dir,
+        io: std.Io,
+        folder: std.Io.Dir,
         path: []const u8 = &.{},
-        dir: ?std.fs.Dir = null,
+        dir: ?std.Io.Dir = null,
 
         fn deinit(d: *D) void {
             d.close();
@@ -272,14 +273,14 @@ fn doSync(self: *Self, folder: []const u8, reset: bool, tree: fs.Tree) !void {
             d.close();
             d.path = wanted_path;
             if (d.path.len > 0)
-                d.dir = try d.folder.makeOpenPath(d.path, .{});
+                d.dir = try d.folder.createDirPathOpen(d.io, d.path, .{});
         }
-        fn get(d: D) std.fs.Dir {
+        fn get(d: D) std.Io.Dir {
             return d.dir orelse d.folder;
         }
         fn close(d: *D) void {
             if (d.dir) |*dd| {
-                dd.close();
+                dd.close(d.io);
                 d.dir = null;
                 d.path = &.{};
             }
@@ -287,10 +288,10 @@ fn doSync(self: *Self, folder: []const u8, reset: bool, tree: fs.Tree) !void {
     };
 
     if (self.env.log.level(1)) |w| {
-        const oper = if (rubr.fs.isDirectory(folder)) "Opening" else "Creating";
+        const oper = if (rubr.fs.isDirectory(self.env.io, folder)) "Opening" else "Creating";
         try w.print("{s} folder {s}\n", .{ oper, folder });
     }
-    var d = D{ .folder = try std.fs.cwd().makeOpenPath(folder, .{}) };
+    var d = D{ .io = self.env.io, .folder = try std.Io.Dir.cwd().createDirPathOpen(self.env.io, folder, .{}) };
     defer d.deinit();
 
     if (self.env.log.level(1)) |w| {
@@ -315,17 +316,17 @@ fn doSync(self: *Self, folder: []const u8, reset: bool, tree: fs.Tree) !void {
 
         var do_extract: bool = true;
         if (!reset) {
-            if (d.get().openFile(file.name, .{ .mode = .read_only })) |f| {
-                defer f.close();
+            if (d.get().openFile(self.env.io, file.name, .{ .mode = .read_only })) |f| {
+                defer f.close(self.env.io);
 
-                const stat = try f.stat();
+                const stat = try f.stat(self.env.io);
                 try tmp.resize(self.env.a, stat.size);
-                const readcount = try f.read(tmp.items);
-                if (readcount == stat.size) {
-                    const cs = crypto.checksum(tmp.items);
-                    if (std.mem.eql(u8, &cs, &checksum))
-                        do_extract = false;
-                }
+                var rbuf: [4096]u8 = undefined;
+                var reader = f.reader(self.env.io, &rbuf);
+                try reader.interface.readSliceAll(tmp.items);
+                const cs = crypto.checksum(tmp.items);
+                if (std.mem.eql(u8, &cs, &checksum))
+                    do_extract = false;
             } else |_| {
                 if (self.env.log.level(1)) |w|
                     try w.print("\tCould not find {s}\n", .{file.name});
@@ -354,17 +355,18 @@ fn doRun(self: *Self, run: prot.Run, folder: []const u8) !void {
     for (run.args.items) |arg|
         try argv.append(self.env.a, arg);
 
-    var proc = std.process.Child.init(argv.items, self.env.a);
-
     // &todo: This might not work for Windows yet: https://github.com/ziglang/zig/issues/5190
-    var folder_dir = try std.fs.openDirAbsolute(folder, .{});
-    defer folder_dir.close();
-    proc.cwd_dir = folder_dir;
+    var folder_dir = try std.Io.Dir.cwd().createDirPathOpen(self.env.io, folder, .{});
+    defer folder_dir.close(self.env.io);
 
-    proc.stdout_behavior = .Pipe;
-    proc.stderr_behavior = .Pipe;
+    const options = std.process.SpawnOptions{
+        .argv = argv.items,
+        .cwd_dir = folder_dir,
+        .stdout = .pipe,
+        .stderr = .pipe,
+    };
 
-    try proc.spawn();
+    var proc = try std.process.spawn(self.env.io, options);
 
     {
         // Reading data from stdout/stderr crossplatform nonblocking seems most easy using MT
@@ -376,16 +378,16 @@ fn doRun(self: *Self, run: prot.Run, folder: []const u8) !void {
         defer thread_stderr.join();
     }
 
-    const term = try proc.wait();
+    const term = try proc.wait(self.env.io);
     if (self.env.log.level(1)) |w|
         try w.print("term: {}\n", .{term});
 
     var done = prot.Done{};
     switch (term) {
-        .Exited => |v| done.exit = v,
-        .Signal => |v| done.signal = v,
-        .Stopped => |v| done.stop = v,
-        .Unknown => |v| done.unknown = v,
+        .exited => |v| done.exit = v,
+        .signal => |v| done.signal = @intFromEnum(v),
+        .stopped => |v| done.stop = v,
+        .unknown => |v| done.unknown = v,
     }
     try self.cio.send(done);
 }
@@ -396,7 +398,7 @@ fn processOutputStdout(self: *Self) !void {
 fn processOutputStderr(self: *Self) !void {
     try self.processOutput_(&self.maybe_stderr, .stderr);
 }
-fn processOutput_(self: *Self, maybe_output: *?std.fs.File, kind: Output.Kind) !void {
+fn processOutput_(self: *Self, maybe_output: *?std.Io.File, kind: Output.Kind) !void {
     var buf: [1024]u8 = undefined;
     if (maybe_output.*) |output| {
         var b: [1024]u8 = undefined;

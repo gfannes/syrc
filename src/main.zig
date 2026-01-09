@@ -5,8 +5,8 @@ const cfg = @import("cfg.zig");
 const rubr = @import("rubr.zig");
 const Env = rubr.Env;
 
-pub fn main() !void {
-    var env_inst = Env.Instance{};
+pub fn main(init: std.process.Init) !void {
+    var env_inst = Env.Instance{ .environ = init.minimal.environ };
     env_inst.init();
     defer env_inst.deinit();
 
@@ -21,7 +21,7 @@ pub fn main() !void {
 
     var cli_args = cli.Args{ .env = env };
     cli_args.init();
-    try cli_args.parse();
+    try cli_args.parse(init.minimal.args);
 
     if (cli_args.print_help) {
         try cli_args.printHelp();

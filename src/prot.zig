@@ -541,7 +541,7 @@ pub const Bye = struct {
 pub fn printMessage(obj: anytype, w: *std.Io.Writer, count: ?usize) void {
     // When `count` is provided, we only print the powers of 2
     if (@popCount(count orelse 0) <= 1) {
-        var node = rubr.naft.Node.init(w);
+        var node = rubr.naft.Node.root(w);
         defer node.deinit();
         obj.write(&node);
     }

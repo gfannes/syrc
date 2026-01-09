@@ -128,11 +128,11 @@ pub const App = struct {
         var tree = try fs.collectTree(self.env, self.args.base);
         defer tree.deinit();
 
-        const file = try std.fs.cwd().createFile("filestates.csv", .{});
-        defer file.close();
+        const file = try std.Io.Dir.cwd().createFile(self.env.io, "filestates.csv", .{});
+        defer file.close(self.env.io);
 
-        var buf: [1024]u8 = undefined;
-        var writer = file.writer(&buf);
+        var wbuf: [1024]u8 = undefined;
+        var writer = file.writer(self.env.io, &wbuf);
 
         try writer.interface.print("path\tname\tsize\n", .{});
         for (tree.filestates.items) |filestate| {
@@ -151,7 +151,7 @@ pub const App = struct {
         if (self.store == null) {
             if (self.env.log.level(1)) |w|
                 try w.print("Creating blob store in '{s}'\n", .{self.args.store_path});
-            self.store = blob.Store.init(self.env.a);
+            self.store = blob.Store.init(self.env);
             try self.store.?.open(self.args.store_path);
         }
         return &self.store.?;

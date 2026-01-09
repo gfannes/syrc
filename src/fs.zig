@@ -37,7 +37,7 @@ pub fn collectTree(env: Env, folder: []const u8) !Tree {
         const Buffer = std.ArrayList(u8);
 
         env: Env,
-        dir: std.fs.Dir,
+        dir: std.Io.Dir,
         filestates: *Tree.FileStates,
         walker: rubr.walker.Walker,
 
@@ -49,7 +49,7 @@ pub fn collectTree(env: Env, folder: []const u8) !Tree {
             my.walker.deinit();
             if (my.buffer) |*buf|
                 buf.deinit(my.env.a);
-            my.dir.close();
+            my.dir.close(my.env.io);
         }
 
         fn collect(my: *My) !void {
@@ -66,14 +66,14 @@ pub fn collectTree(env: Env, folder: []const u8) !Tree {
             }
         }
 
-        pub fn call(my: *My, dirr: std.fs.Dir, path: []const u8, maybe_offsets: ?rubr.walker.Offsets, kind: rubr.walker.Kind) !void {
+        pub fn call(my: *My, dirr: std.Io.Dir, path: []const u8, maybe_offsets: ?rubr.walker.Offsets, kind: rubr.walker.Kind) !void {
             if (kind == rubr.walker.Kind.File) {
                 const offsets = maybe_offsets orelse return Error.ExpectedOffsets;
 
-                const file = try dirr.openFile(path, .{});
-                defer file.close();
+                const file = try dirr.openFile(my.env.io, path, .{});
+                defer file.close(my.env.io);
 
-                const stat = try file.stat();
+                const stat = try file.stat(my.env.io);
                 const my_size = stat.size;
                 my.total_size += my_size;
                 if (my.env.log.level(3)) |w|
@@ -87,11 +87,11 @@ pub fn collectTree(env: Env, folder: []const u8) !Tree {
                     filestate.path = try my.env.a.dupe(u8, path[offsets.base .. offsets.name - 1]);
                 filestate.name = try my.env.a.dupe(u8, path[offsets.name..]);
 
-                const mode: u16 = @intCast(stat.mode);
+                // &todo fix execute mode
                 filestate.attributes = .{
-                    .read = mode & (1 << 8) != 0,
-                    .write = mode & (1 << 7) != 0,
-                    .execute = mode & (1 << 6) != 0,
+                    .read = true,
+                    .write = !stat.permissions.readOnly(),
+                    .execute = false,
                 };
 
                 var content: []u8 = &.{};
@@ -116,7 +116,7 @@ pub fn collectTree(env: Env, folder: []const u8) !Tree {
 
     var collector = Collector{
         .env = env,
-        .dir = try std.fs.openDirAbsolute(folder, .{}),
+        .dir = try std.Io.Dir.openDirAbsolute(env.io, folder, .{}),
         .filestates = &res.filestates,
         .walker = rubr.walker.Walker{ .env = env },
     };

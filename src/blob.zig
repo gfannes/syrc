@@ -6,7 +6,6 @@ const rubr = @import("rubr.zig");
 
 pub const Error = error{
     ExpectedDir,
-    ExpectedSameSize,
 };
 
 pub const Key = crypto.Checksum;
@@ -47,26 +46,26 @@ pub const Store = struct {
     const Self = @This();
     const Buffer = std.ArrayList(u8);
 
-    a: std.mem.Allocator,
-    dir: ?std.fs.Dir = null,
+    env: rubr.Env,
+    dir: ?std.Io.Dir = null,
     tmp: Buffer = .{},
 
-    pub fn init(a: std.mem.Allocator) Self {
-        return Store{ .a = a };
+    pub fn init(env: rubr.Env) Self {
+        return Store{ .env = env };
     }
     pub fn deinit(self: *Self) void {
         self.close();
-        self.tmp.deinit(self.a);
+        self.tmp.deinit(self.env.a);
     }
 
     // Creates `path` if it does not exist yet
     pub fn open(self: *Self, path: []const u8) !void {
         self.close();
-        self.dir = try std.fs.cwd().makeOpenPath(path, .{});
+        self.dir = try std.Io.Dir.cwd().createDirPathOpen(self.env.io, path, .{});
     }
     pub fn close(self: *Self) void {
         if (self.dir) |*dir| {
-            dir.close();
+            dir.close(self.env.io);
             self.dir = null;
         }
     }
@@ -74,8 +73,8 @@ pub const Store = struct {
     pub fn hasFile(self: *Self, key: Key) bool {
         if (self.dir) |dir| {
             const subpath = SubPath.init(key);
-            if (dir.openFile(subpath.all(), .{ .mode = .read_only })) |file| {
-                file.close();
+            if (dir.openFile(self.env.io, subpath.all(), .{ .mode = .read_only })) |file| {
+                file.close(self.env.io);
                 return true;
             } else |_| {}
         }
@@ -87,50 +86,50 @@ pub const Store = struct {
 
         const subpath = SubPath.init(key);
 
-        var subdir = try dir.makeOpenPath(subpath.dir(), .{});
-        defer subdir.close();
+        var subdir = try dir.createDirPathOpen(self.env.io, subpath.dir(), .{});
+        defer subdir.close(self.env.io);
 
-        const file = try subdir.createFile(subpath.name(), .{});
-        defer file.close();
+        const file = try subdir.createFile(self.env.io, subpath.name(), .{});
+        defer file.close(self.env.io);
 
-        try file.writeAll(content);
+        var buffer: [4096]u8 = undefined;
+        var writer = file.writer(self.env.io, &buffer);
+        try writer.interface.writeAll(content);
     }
 
     // &todo: set attributes as well
     // https://cfengine.com/blog/2024/efficient-data-copying-on-modern-linux/
     // Use sendfile() or copy_file_range()
-    pub fn extractFile(self: *Self, key: Key, dir: std.fs.Dir, filename: []const u8, attributes: ?prot.FileState.Attributes) !bool {
+    pub fn extractFile(self: *Self, key: Key, dir: std.Io.Dir, filename: []const u8, attributes: ?prot.FileState.Attributes) !bool {
         {
             const src_dir = self.dir orelse return Error.ExpectedDir;
 
             const subpath = SubPath.init(key);
 
-            const file = src_dir.openFile(subpath.all(), .{ .mode = .read_only }) catch return false;
-            defer file.close();
+            const file = src_dir.openFile(self.env.io, subpath.all(), .{ .mode = .read_only }) catch return false;
+            defer file.close(self.env.io);
 
-            const stat = try file.stat();
-            try self.tmp.resize(self.a, stat.size);
-            const size = try file.read(self.tmp.items);
-            if (size != stat.size)
-                return Error.ExpectedSameSize;
+            const stat = try file.stat(self.env.io);
+            try self.tmp.resize(self.env.a, stat.size);
+            var rbuf: [4096]u8 = undefined;
+            var reader = file.reader(self.env.io, &rbuf);
+            try reader.interface.readSliceAll(self.tmp.items);
         }
 
         {
-            const file = try dir.createFile(filename, .{});
-            defer file.close();
+            const file = try dir.createFile(self.env.io, filename, .{});
+            defer file.close(self.env.io);
 
-            try file.writeAll(self.tmp.items);
+            var wbuf: [4096]u8 = undefined;
+            var writer = file.writer(self.env.io, &wbuf);
+            try writer.interface.writeAll(self.tmp.items);
 
             if (attributes) |attr| {
-                var mode: std.Io.File.Mode = 0x8024;
-                if (attr.read)
-                    mode |= 1 << 8;
-                if (attr.write)
-                    mode |= 1 << 7;
-                if (attr.execute)
-                    mode |= 1 << 6;
+                var permissions = std.Io.File.Permissions.default_file;
+                permissions = permissions.setReadOnly(attr.read);
+                // &todo support executable permission
                 if (builtin.os.tag != .windows)
-                    try file.chmod(mode);
+                    try file.setPermissions(self.env.io, permissions);
             }
         }
 
@@ -143,7 +142,7 @@ pub const Store = struct {
         for (0..256) |i| {
             const byte: u8 = @intCast(i);
             const subdir = std.fmt.hex(byte);
-            dir.deleteTree(&subdir) catch {};
+            dir.deleteTree(self.env.io, &subdir) catch {};
         }
     }
 };
@@ -151,6 +150,7 @@ pub const Store = struct {
 test "blob.Store" {
     const ut = std.testing;
     const a = ut.allocator;
+    const io = ut.io;
 
     var store = Store.init(a);
     defer store.deinit();
@@ -177,8 +177,8 @@ test "blob.Store" {
     try store.addFile(key, "Hello Store");
     try ut.expect(store.hasFile(key));
 
-    var dst_dir = try std.fs.cwd().makeOpenPath("tmp/repro", .{});
-    defer dst_dir.close();
+    var dst_dir = try std.Io.Dir.cwd().createDirPathOpen(io, "tmp/repro", .{});
+    defer dst_dir.close(io);
 
     try ut.expect(try store.extractFile(key, dst_dir, "myfile.txt", null));
 }

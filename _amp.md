@@ -1,4 +1,4 @@
-&&:syrc
+&&:syrc &b &2025
 
 # Client
 - [x] Measure/print duration

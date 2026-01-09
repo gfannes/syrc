@@ -52,8 +52,8 @@ pub const Args = struct {
         else |_| {}
     }
 
-    pub fn parse(self: *Self) !void {
-        try self.args.setupFromOS();
+    pub fn parse(self: *Self, os_args: std.process.Args) !void {
+        try self.args.setupFromOS(os_args);
 
         self.exe_name = (self.args.pop() orelse return Error.ExpectedExeName).arg;
 
@@ -109,10 +109,10 @@ pub const Args = struct {
 
         if (!std.fs.path.isAbsolute(self.base)) {
             const part = if (self.base.len == 0) "." else self.base;
-            self.base = try rubr.fs.cwdPathAlloc(self.env.aa, part);
+            self.base = try rubr.fs.cwdPathAlloc(self.env.io, self.env.aa, part);
         }
         if (!std.fs.path.isAbsolute(self.store_path)) {
-            self.store_path = try rubr.fs.homePathAlloc(self.env.aa, self.store_path);
+            self.store_path = try rubr.fs.homePathAlloc(self.env, self.store_path);
             if (self.env.log.level(1)) |w|
                 try w.print("Store will be stored in '{s}'\n", .{self.store_path});
         }
@@ -123,7 +123,7 @@ pub const Args = struct {
         try self.env.stdout.print("    -h/--help                      Print this help\n", .{});
         try self.env.stdout.print("    -v/--verbose         LEVEL     Verbosity level\n", .{});
         try self.env.stdout.print("    -j/--jobs            NUMBER    Number of threads to use [optional, default is {}]\n", .{self.j});
-        try self.env.stdout.print("    -b/--base            FOLDER    Base folder to use [optional, default is '{s}']\n", .{try rubr.fs.cwdPathAlloc(self.env.aa, null)});
+        try self.env.stdout.print("    -b/--base            FOLDER    Base folder to use [optional, default is '{s}']\n", .{try rubr.fs.cwdPathAlloc(self.env.io, self.env.aa, null)});
         try self.env.stdout.print("    -n/--name            NAME      Name to use [optional, default is '{s}']\n", .{Default.name});
         try self.env.stdout.print("    -r/--reset-folder              Force a reset of the base destination folder [optional, default is 'no']\n", .{});
         try self.env.stdout.print("    -R/--reset-store               Force a reset of peer's store [optional, default is 'no']\n", .{});
