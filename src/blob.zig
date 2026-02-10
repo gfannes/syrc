@@ -95,6 +95,7 @@ pub const Store = struct {
         var buffer: [4096]u8 = undefined;
         var writer = file.writer(self.env.io, &buffer);
         try writer.interface.writeAll(content);
+        try writer.interface.flush();
     }
 
     // &todo: set attributes as well
@@ -117,12 +118,18 @@ pub const Store = struct {
         }
 
         {
-            const file = try dir.createFile(self.env.io, filename, .{});
+            const file = dir.createFile(self.env.io, filename, .{}) catch |err| blk: {
+                if (err != error.AccessDenied)
+                    return err;
+                try dir.deleteFile(self.env.io, filename);
+                break :blk try dir.createFile(self.env.io, filename, .{});
+            };
             defer file.close(self.env.io);
 
             var wbuf: [4096]u8 = undefined;
             var writer = file.writer(self.env.io, &wbuf);
             try writer.interface.writeAll(self.tmp.items);
+            try writer.interface.flush();
 
             if (attributes) |attr| {
                 var permissions = std.Io.File.Permissions.default_file;

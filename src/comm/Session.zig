@@ -70,12 +70,12 @@ pub fn runClient(self: *Self, name: ?[]const u8, reset_folder: bool, cleanup_fol
             if (hello.status != .Ok) {
                 try bye.setReason("Expected status Ok, not {}", .{hello.status});
                 try self.cio.send(bye);
-                return Error.ExpectedStatusOk;
+                return error.ExpectedStatusOk;
             }
         } else {
             if (self.env.log.level(1)) |w|
                 prot.printMessage(bye, w, null);
-            return Error.PeerGaveUp;
+            return error.PeerGaveUp;
         }
     }
 
@@ -171,13 +171,13 @@ pub fn runServer(self: *Self) !void {
             if (hello.version != prot.My.version) {
                 try bye.setReason("Version mismatch: mine {} !=  peer {}", .{ prot.My.version, hello.version });
                 try self.cio.send(bye);
-                return Error.VersionMismatch;
+                return error.VersionMismatch;
             }
             try self.cio.send(prot.Hello{ .role = .Client, .status = .Ok });
         } else {
             if (self.env.log.level(1)) |w|
                 prot.printMessage(bye, w, null);
-            return Error.PeerGaveUp;
+            return error.PeerGaveUp;
         }
     }
 
@@ -192,7 +192,7 @@ pub fn runServer(self: *Self) !void {
         var sync = prot.Sync.init(a);
 
         if (!try self.cio.receive(&sync))
-            return Error.ExpectedSync;
+            return error.ExpectedSync;
         if (self.env.log.level(1)) |w|
             prot.printMessage(sync, w, null);
 
@@ -202,11 +202,11 @@ pub fn runServer(self: *Self) !void {
         }
 
         {
-            const subdir = sync.subdir orelse return Error.SyncToRootNotSupportedYet;
+            const subdir = sync.subdir orelse return error.SyncToRootNotSupportedYet;
             if (subdir.len == 0)
-                return Error.EmptySubdir;
+                return error.EmptySubdir;
             if (std.fs.path.isAbsolute(subdir))
-                return Error.OnlyRelativePathAllowed;
+                return error.OnlyRelativePathAllowed;
 
             folder = try std.fs.path.join(self.env.a, &[_][]const u8{ self.base, subdir });
 
@@ -309,7 +309,7 @@ fn doSync(self: *Self, folder: []const u8, reset: bool, tree: fs.Tree) !void {
             }
         }
 
-        const checksum = file.checksum orelse return Error.ExpectedChecksum;
+        const checksum = file.checksum orelse return error.ExpectedChecksum;
         const path = file.path orelse "";
 
         try d.set(path);
@@ -336,7 +336,7 @@ fn doSync(self: *Self, folder: []const u8, reset: bool, tree: fs.Tree) !void {
         if (do_extract) {
             if (!try self.store.extractFile(checksum, d.get(), file.name, file.attributes)) {
                 try self.env.log.err("Could not extract file '{s}'\n", .{file.name});
-                return Error.CouldNotExtractFile;
+                return error.CouldNotExtractFile;
             }
             extract_count += 1;
         }
@@ -399,38 +399,37 @@ fn processOutputStderr(self: *Self) !void {
     try self.processOutput_(&self.maybe_stderr, .stderr);
 }
 fn processOutput_(self: *Self, maybe_output: *?std.Io.File, kind: Output.Kind) !void {
-    var buf: [1024]u8 = undefined;
     if (maybe_output.*) |output| {
-        var b: [1024]u8 = undefined;
-        var reader = output.reader(self.env.io, &b);
+        var rbuf: [1024]u8 = undefined;
+        var reader = output.reader(self.env.io, &rbuf);
+
         var output_indicator = Output.Indicator{};
-        while (true) {
-            const n = try reader.interface.readSliceShort(&buf);
-            if (n > 0) {
-                if (self.env.log.level(1)) |w| {
-                    try output_indicator.set(kind, w, w);
-                    try w.print("{s}", .{buf[0..n]});
-                    try w.flush();
-                }
+        while (reader.interface.peekGreedy(1)) |str| {
+            defer reader.interface.tossBuffered();
 
-                var outp = prot.Output.init(self.env.a);
-                defer outp.deinit();
-                switch (kind) {
-                    .stdout => outp.stdout = try outp.a.dupe(u8, buf[0..n]),
-                    .stderr => outp.stderr = try outp.a.dupe(u8, buf[0..n]),
-                }
+            if (self.env.log.level(1)) |w| {
+                try output_indicator.set(kind, w, w);
+                try w.print("{s}", .{str});
+                try w.flush();
+            }
 
-                {
-                    self.mutex.lock();
-                    defer self.mutex.unlock();
-                    try self.cio.send(outp);
-                }
+            var outp = prot.Output.init(self.env.a);
+            defer outp.deinit();
+            switch (kind) {
+                .stdout => outp.stdout = try outp.a.dupe(u8, str),
+                .stderr => outp.stderr = try outp.a.dupe(u8, str),
             }
-            if (n < buf.len) {
-                // End of file
-                maybe_output.* = null;
-                break;
+
+            {
+                self.mutex.lock();
+                defer self.mutex.unlock();
+                try self.cio.send(outp);
             }
+        } else |err| {
+            // End of file
+            maybe_output.* = null;
+            if (err != error.EndOfStream)
+                return err;
         }
     }
 }
@@ -512,7 +511,7 @@ fn receiveFolderFromPeer(self: *Self, a: std.mem.Allocator, folder: []const u8, 
         while (true) {
             var filestate = prot.FileState.init(a);
             if (!try self.cio.receive(&filestate))
-                return Error.ExpectedFileState;
+                return error.ExpectedFileState;
 
             if (self.env.log.level(1)) |w|
                 prot.printMessage(filestate, w, tree.filestates.items.len);
@@ -521,7 +520,7 @@ fn receiveFolderFromPeer(self: *Self, a: std.mem.Allocator, folder: []const u8, 
 
             try tree.filestates.append(a, filestate);
 
-            const checksum = filestate.checksum orelse return Error.ExpectedChecksum;
+            const checksum = filestate.checksum orelse return error.ExpectedChecksum;
             if (!self.store.hasFile(checksum)) {
                 // Indicate we do not have this file
                 try missings.append(a, id);
@@ -552,7 +551,7 @@ fn receiveFolderFromPeer(self: *Self, a: std.mem.Allocator, folder: []const u8, 
             defer content.deinit();
 
             if (!try self.cio.receive(&content))
-                return Error.ExpectedContent;
+                return error.ExpectedContent;
 
             if (self.env.log.level(1)) |w|
                 prot.printMessage(content, w, count);
@@ -560,7 +559,7 @@ fn receiveFolderFromPeer(self: *Self, a: std.mem.Allocator, folder: []const u8, 
             if (content.id == null)
                 break;
 
-            const str = content.str orelse return Error.ExpectedString;
+            const str = content.str orelse return error.ExpectedString;
             try self.store.addFile(crypto.checksum(str), str);
         }
         if (self.env.log.level(1)) |w| {

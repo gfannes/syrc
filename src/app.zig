@@ -101,6 +101,8 @@ pub const App = struct {
         while (true) {
             server.processOne() catch |err| {
                 try self.env.log.err("Session failed: {any}\n", .{err});
+                // Less robust but makes the error trace visible in debug mode
+                return err;
             };
         }
     }

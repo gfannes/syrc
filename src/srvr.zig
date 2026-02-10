@@ -33,7 +33,7 @@ pub const Server = struct {
     }
 
     pub fn processOne(self: *Self) !void {
-        var server = self.server orelse return Error.ExpectedListeningServer;
+        var server = self.server orelse return error.ExpectedListeningServer;
 
         if (self.env.log.level(1)) |w| {
             try w.print("\nWaiting for connection...\n", .{});
