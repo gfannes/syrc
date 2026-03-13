@@ -1,4 +1,4 @@
-// Output from `rake export[walker,cli,Log,profile,naft,util,comm,pipe,fs,fmt,Env]` from https://github.com/gfannes/rubr from 2026-01-09
+// Output from `rake export[walker,cli,Log,profile,naft,util,comm,pipe,fs,fmt,Env]` from https://github.com/gfannes/rubr from 2026-03-13
 
 const std = @import("std");
 const builtin = @import("builtin");
@@ -35,7 +35,7 @@ pub const walker = struct {
     
         ignore_offset: usize = 0,
     
-        ignore_stack: IgnoreStack = .{},
+        ignore_stack: IgnoreStack = .empty,
     
         pub fn deinit(self: *Walker) void {
             for (self.ignore_stack.items) |*item| {
@@ -185,8 +185,8 @@ pub const walker = struct {
             const Strings = std.ArrayList([]const u8);
         
             a: std.mem.Allocator,
-            globs: Globs = .{},
-            antiglobs: Globs = .{},
+            globs: Globs = .empty,
+            antiglobs: Globs = .empty,
         
             pub fn init(a: std.mem.Allocator) Ignore {
                 return Ignore{ .a = a };
@@ -281,7 +281,7 @@ pub const walker = struct {
 
 // Export from 'src/slc.zig'
 pub const slc = struct {
-    pub fn is_empty(slice: anytype) bool {
+    pub fn isEmpty(slice: anytype) bool {
         return slice.len == 0;
     }
     
@@ -348,8 +348,9 @@ pub const Env = struct {
         log: Log = undefined,
         gpa: GPA = undefined,
         aa: AA = undefined,
-        io: std.Io.Threaded = undefined,
-        maybe_start: ?std.time.Instant = null,
+        io_threaded: std.Io.Threaded = undefined,
+        io: std.Io = undefined,
+        start_ts: std.Io.Timestamp = undefined,
         stdio: StdIO = undefined,
     
         pub fn init(self: *Self) void {
@@ -357,17 +358,17 @@ pub const Env = struct {
             const a = self.gpa.allocator();
             self.envmap = self.environ.createMap(a) catch std.process.Environ.Map.init(a);
             self.aa = AA.init(a);
-            self.io = std.Io.Threaded.init(a, .{ .environ = self.environ });
-            const io = self.io.io();
-            self.log = Log{ .io = io };
+            self.io_threaded = std.Io.Threaded.init(a, .{ .environ = self.environ });
+            self.io = self.io_threaded.io();
+            self.log = Log{ .io = self.io };
             self.log.init();
-            self.maybe_start = std.time.Instant.now() catch null;
-            self.stdio.init(io);
+            self.start_ts = std.Io.Clock.now(.real, self.io);
+            self.stdio.init(self.io);
         }
         pub fn deinit(self: *Self) void {
             self.stdio.deinit();
             self.log.deinit();
-            self.io.deinit();
+            self.io_threaded.deinit();
             self.aa.deinit();
             self.envmap.deinit();
             if (self.gpa.deinit() == .leak) {
@@ -379,7 +380,7 @@ pub const Env = struct {
             return .{
                 .a = self.gpa.allocator(),
                 .aa = self.aa.allocator(),
-                .io = self.io.io(),
+                .io = self.io,
                 .envmap = &self.envmap,
                 .log = &self.log,
                 .stdout = &self.stdio.stdout_writer.interface,
@@ -387,15 +388,14 @@ pub const Env = struct {
             };
         }
     
-        pub fn duration_ns(self: Self) u64 {
-            const start = self.maybe_start orelse return 0;
-            const now = std.time.Instant.now() catch return 0;
-            return now.since(start);
+        pub fn duration_ns(self: Self) i96 {
+            const duration = self.start_ts.durationTo(std.Io.Clock.now(.real, self.io));
+            return duration.nanoseconds;
         }
     };
     
-    pub fn duration_ns(env: Env_) u64 {
-        const inst: *const Instance = @fieldParentPtr("log", env.log);
+    pub fn duration_ns(env: Env_) i96 {
+        const inst: *const Instance = @alignCast(@fieldParentPtr("log", env.log));
         return inst.duration_ns();
     }
     
@@ -628,7 +628,7 @@ pub const glb = struct {
         const Parts = std.ArrayList(Part);
     
         a: std.mem.Allocator,
-        parts: Parts = .{},
+        parts: Parts = .empty,
         config: ?*Config = null,
     
         pub fn init(config: Config, ma: std.mem.Allocator) !Glob {
@@ -991,24 +991,26 @@ pub const profile = struct {
     pub const Scope = struct {
         const Self = @This();
     
+        io: std.Io,
+    
         id: Id,
-        start: std.time.Instant,
+        start_ts: std.Io.Timestamp,
         w: *std.Io.Writer,
     
-        pub fn init(id: Id, w: *std.Io.Writer) Scope {
-            return Scope{ .id = id, .start = Self.now(), .w = w };
+        pub fn init(io: std.Io, id: Id, w: *std.Io.Writer) Scope {
+            return Scope{ .io = io, .id = id, .start_ts = std.Io.Clock.now(.real, io), .w = w };
         }
         pub fn deinit(self: Self) void {
-            const elapse = now().since(self.start);
-            measurements[@intFromEnum(self.id)].max = elapse;
-            const a = @divFloor(elapse, 1_000_000_000);
-            const b = elapse - a * 1_000_000_000;
+            const elapse_ns = self.start_ts.durationTo(self.now()).nanoseconds;
+            measurements[@intFromEnum(self.id)].max = elapse_ns;
+            const a = @divFloor(elapse_ns, 1_000_000_000);
+            const b = elapse_ns - a * 1_000_000_000;
             self.w.print("elapse: {}.{:0>9.9}s\n", .{ a, @as(u64, @intCast(b)) }) catch {};
             self.w.flush() catch {};
         }
     
-        fn now() std.time.Instant {
-            return std.time.Instant.now() catch @panic("Cannot get current time");
+        fn now(self: Self) std.Io.Timestamp {
+            return std.Io.Clock.now(.real, self.io);
         }
     };
     
@@ -1542,14 +1544,15 @@ pub const pipe = struct {
             .drain = drain,
         };
         const Intern = struct {
+            io: std.Io,
             buffer: []u8,
             head: usize = 0,
             len: usize = 0,
-            mutex: std.Thread.Mutex = .{},
-            cond: std.Thread.Condition = .{},
-                data: [2][]u8 = undefined,
+            mutex: std.Io.Mutex = .init,
+            cond: std.Io.Condition = .init,
+            data: [2][]u8 = undefined,
     
-            fn is_empty(i: @This()) bool {
+            fn isEmpty(i: @This()) bool {
                 return i.len == 0;
             }
             fn is_full(i: @This()) bool {
@@ -1572,20 +1575,20 @@ pub const pipe = struct {
                     // Buffer is empty
                     // Set head to 0 to optimize placement
                     i.head = 0;
-                        return i.data[0..0];
+                    return i.data[0..0];
                 } else if (i.len == i.buffer.len) {
                     // Buffer is full
-                        i.data[0] = i.buffer;
-                        return i.data[0..1];
+                    i.data[0] = i.buffer;
+                    return i.data[0..1];
                 } else if (i.head + i.len <= i.buffer.len) {
                     // Buffer is contiguous
-                        i.data[0] = i.buffer[i.head .. i.head + i.len];
-                        return i.data[0..1];
+                    i.data[0] = i.buffer[i.head .. i.head + i.len];
+                    return i.data[0..1];
                 } else {
                     // Buffer wraps over end
-                        i.data[0] = i.buffer[i.head..];
-                        i.data[1] = i.buffer[0 .. i.len - (i.buffer.len - i.head)];
-                        return i.data[0..2];
+                    i.data[0] = i.buffer[i.head..];
+                    i.data[1] = i.buffer[0 .. i.len - (i.buffer.len - i.head)];
+                    return i.data[0..2];
                 }
             }
             fn unused(i: *Intern) []const []u8 {
@@ -1593,28 +1596,28 @@ pub const pipe = struct {
                     // Buffer is empty: unused is the full buffer
                     // Set head to 0 to optimize placement
                     i.head = 0;
-                        i.data[0] = i.buffer;
-                        return i.data[0..1];
+                    i.data[0] = i.buffer;
+                    return i.data[0..1];
                 } else if (i.len == i.buffer.len) {
                     // Buffer is full: unused is empty
-                        return i.data[0..0];
+                    return i.data[0..0];
                 } else if (i.head + i.len < i.buffer.len) {
                     // Buffer has unused space after
                     if (i.head == 0) {
                         // and no unused space in front
-                            i.data[0] = i.buffer[i.head + i.len ..];
-                            return i.data[0..1];
+                        i.data[0] = i.buffer[i.head + i.len ..];
+                        return i.data[0..1];
                     } else {
                         // and unused space in front
-                            i.data[0] = i.buffer[i.head + i.len ..];
-                            i.data[1] = i.buffer[0..i.head];
-                            return i.data[0..2];
+                        i.data[0] = i.buffer[i.head + i.len ..];
+                        i.data[1] = i.buffer[0..i.head];
+                        return i.data[0..2];
                     }
                 } else {
                     // Unused buffer is contiguous and runs till i.head
                     const len = i.buffer.len - i.len;
-                        i.data[0] = i.buffer[i.head - len .. i.head];
-                        return i.data[0..1];
+                    i.data[0] = i.buffer[i.head - len .. i.head];
+                    return i.data[0..1];
                 }
             }
         };
@@ -1623,13 +1626,14 @@ pub const pipe = struct {
         intern: Intern,
         reader: std.Io.Reader,
     
-        pub fn init(wb: []u8, ib: []u8, rb: []u8) Self {
+        pub fn init(io: std.Io, wb: []u8, ib: []u8, rb: []u8) Self {
             return Self{
                 .writer = .{
                     .vtable = &writer_vtable,
                     .buffer = wb,
                 },
                 .intern = Intern{
+                    .io = io,
                     .buffer = ib,
                 },
                 .reader = .{
@@ -1680,11 +1684,11 @@ pub const pipe = struct {
             const orig_src_len = src.len;
     
             {
-                intern.mutex.lock();
-                defer intern.mutex.unlock();
+                intern.mutex.lock(intern.io) catch {};
+                defer intern.mutex.unlock(intern.io);
     
                 while (intern.is_full()) {
-                    intern.cond.wait(&intern.mutex);
+                    intern.cond.wait(intern.io, &intern.mutex) catch {};
                 }
     
                 // Copy `src` into intern
@@ -1704,7 +1708,7 @@ pub const pipe = struct {
                 }
             }
     
-            intern.cond.signal();
+            intern.cond.signal(intern.io);
     
             return if (copy_from_buffer) 0 else orig_src_len - src.len;
         }
@@ -1716,11 +1720,11 @@ pub const pipe = struct {
             var intern = &p.intern;
     
             {
-                intern.mutex.lock();
-                defer intern.mutex.unlock();
+                intern.mutex.lock(intern.io) catch {};
+                defer intern.mutex.unlock(intern.io);
     
-                while (intern.is_empty()) {
-                    intern.cond.wait(&intern.mutex);
+                while (intern.isEmpty()) {
+                    intern.cond.wait(intern.io, &intern.mutex) catch {};
                 }
     
                 if (r.seek == r.end) {
@@ -1745,7 +1749,7 @@ pub const pipe = struct {
                 }
             }
     
-            intern.cond.signal();
+            intern.cond.signal(intern.io);
     
             return 0;
         }
@@ -1808,7 +1812,7 @@ pub const fs = struct {
             try env.a.dupe(u8, home);
     }
     
-    pub fn cwdPathAlloc(io: std.Io, a: std.mem.Allocator, maybe_part: ?[]const u8) ![]u8 {
+    pub fn cwdPathAlloc(io: std.Io, a: std.mem.Allocator, maybe_part: ?[]const u8) ![:0]u8 {
         return try std.Io.Dir.cwd().realPathFileAlloc(io, maybe_part orelse ".", a);
     }
     

@@ -48,7 +48,7 @@ pub const Store = struct {
 
     env: rubr.Env,
     dir: ?std.Io.Dir = null,
-    tmp: Buffer = .{},
+    tmp: Buffer = .empty,
 
     pub fn init(env: rubr.Env) Self {
         return Store{ .env = env };

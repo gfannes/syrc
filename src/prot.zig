@@ -342,7 +342,7 @@ pub const Run = struct {
 
     a: std.mem.Allocator,
     cmd: []const u8 = &.{},
-    args: Args = .{},
+    args: Args = .empty,
 
     pub fn init(a: std.mem.Allocator) Self {
         return Self{ .a = a };

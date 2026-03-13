@@ -42,7 +42,7 @@ args: []const []const u8 = &.{},
 
 maybe_stdout: ?std.Io.File = null,
 maybe_stderr: ?std.Io.File = null,
-mutex: std.Thread.Mutex = .{},
+mutex: std.Io.Mutex = .init,
 
 pub fn init(self: *Self, stream: std.Io.net.Stream) !void {
     self.stream = stream;
@@ -298,7 +298,7 @@ fn doSync(self: *Self, folder: []const u8, reset: bool, tree: fs.Tree) !void {
         try w.print("Reconstructing the Tree...\n", .{});
         try w.flush();
     }
-    var tmp = std.ArrayList(u8){};
+    var tmp = std.ArrayList(u8).empty;
     defer tmp.deinit(self.env.a);
     var extract_count: u64 = 0;
     for (tree.filestates.items, 0..) |file, count| {
@@ -348,7 +348,7 @@ fn doSync(self: *Self, folder: []const u8, reset: bool, tree: fs.Tree) !void {
 }
 
 fn doRun(self: *Self, run: prot.Run, folder: []const u8) !void {
-    var argv = std.ArrayList([]const u8){};
+    var argv = std.ArrayList([]const u8).empty;
     defer argv.deinit(self.env.a);
 
     try argv.append(self.env.a, run.cmd);
@@ -361,7 +361,7 @@ fn doRun(self: *Self, run: prot.Run, folder: []const u8) !void {
 
     const options = std.process.SpawnOptions{
         .argv = argv.items,
-        .cwd_dir = folder_dir,
+        .cwd = .{ .dir = folder_dir },
         .stdout = .pipe,
         .stderr = .pipe,
     };
@@ -421,8 +421,8 @@ fn processOutput_(self: *Self, maybe_output: *?std.Io.File, kind: Output.Kind) !
             }
 
             {
-                self.mutex.lock();
-                defer self.mutex.unlock();
+                try self.mutex.lock(self.env.io);
+                defer self.mutex.unlock(self.env.io);
                 try self.cio.send(outp);
             }
         } else |err| {
@@ -459,7 +459,7 @@ fn sendFolderToPeer(self: *Self, folder: []const u8) !void {
     }
 
     // Read all the Missing data
-    var missings = std.ArrayList(usize){};
+    var missings = std.ArrayList(usize).empty;
     defer missings.deinit(self.env.a);
     for (0..std.math.maxInt(usize)) |count| {
         var missing = prot.Missing{};
@@ -505,7 +505,7 @@ fn receiveFolderFromPeer(self: *Self, a: std.mem.Allocator, folder: []const u8, 
 
     // Receive all the FileStates of the Tree we have to recreate into folder
     // We compute the missing data immediately
-    var missings = std.ArrayList(u64){};
+    var missings = std.ArrayList(u64).empty;
     defer missings.deinit(a);
     {
         while (true) {

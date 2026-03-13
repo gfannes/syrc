@@ -43,7 +43,7 @@ pub const Args = struct {
     reset_store: bool = false,
     collect: bool = false,
     store_path: []const u8 = Default.store_dir,
-    extra: Strings = .{},
+    extra: Strings = .empty,
 
     pub fn init(self: *Self) void {
         self.args = rubr.cli.Args{ .env = self.env };

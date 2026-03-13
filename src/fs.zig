@@ -15,7 +15,7 @@ pub const Tree = struct {
     pub const FileStates = std.ArrayList(prot.FileState);
 
     env: Env,
-    filestates: FileStates = .{},
+    filestates: FileStates = .empty,
 
     pub fn deinit(self: *Self) void {
         for (self.filestates.items) |*fs|
@@ -57,11 +57,11 @@ pub fn collectTree(env: Env, folder: []const u8) !Tree {
                 try w.print("Reading Tree...\n", .{});
                 try w.flush();
             }
-            const start = try std.time.Instant.now();
+            const start_ts = std.Io.Clock.now(.real, my.env.io);
             try my.walker.walk(my.dir, my);
-            const stop = try std.time.Instant.now();
+            const stop_ts = std.Io.Clock.now(.real, my.env.io);
             if (my.env.log.level(1)) |w| {
-                try w.print("Read {f}B in {f}s\n", .{ rubr.fmt.iso(my.total_size, false), rubr.fmt.iso(stop.since(start), true) });
+                try w.print("Read {f}B in {f}s\n", .{ rubr.fmt.iso(my.total_size, false), rubr.fmt.iso(start_ts.durationTo(stop_ts).nanoseconds, true) });
                 try w.flush();
             }
         }

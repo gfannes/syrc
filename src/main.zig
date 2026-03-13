@@ -12,7 +12,7 @@ pub fn main(init: std.process.Init) !void {
 
     var env = env_inst.env();
 
-    const s = rubr.profile.Scope.init(.A, env.stdout);
+    const s = rubr.profile.Scope.init(env.io, .A, env.stdout);
     defer s.deinit();
 
     var config = cfg.Config.init(env.a);
