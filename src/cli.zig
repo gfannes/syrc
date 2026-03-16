@@ -10,6 +10,7 @@ pub const Error = error{
     ExpectedIp,
     ExpectedPort,
     ExpectedMode,
+    ExpectedEnvVar,
     ModeFormatError,
 };
 
@@ -43,6 +44,7 @@ pub const Args = struct {
     reset_store: bool = false,
     collect: bool = false,
     store_path: []const u8 = Default.store_dir,
+    envvars: Strings = .empty,
     extra: Strings = .empty,
 
     pub fn init(self: *Self) void {
@@ -83,6 +85,9 @@ pub const Args = struct {
                     self.port = try (self.args.pop() orelse return Error.ExpectedPort).as(u16);
                 } else if (arg.is("-s", "--store")) {
                     self.store_path = (self.args.pop() orelse return Error.ExpectedFolder).arg;
+                } else if (arg.is("-e", "-envvar")) {
+                    const envvar = (self.args.pop() orelse return Error.ExpectedEnvVar);
+                    try self.envvars.append(self.env.aa, envvar.arg);
                 } else if (arg.is("-m", "--mode")) {
                     const mode = (self.args.pop() orelse return Error.ExpectedMode);
                     self.mode = if (mode.is("clnt", "client"))
@@ -135,6 +140,7 @@ pub const Args = struct {
         try self.env.stdout.print("    -p/--port            PORT      Port to use [optional, default is {}]\n", .{Default.port});
         try self.env.stdout.print("    -m/--mode            MODE      Operation mode: 'client', 'server', 'check' and 'test'\n", .{});
         try self.env.stdout.print("    -s/--store           FOLDER    Folder for blob store [optional, default is $HOME/{s}]\n", .{Default.store_dir});
+        try self.env.stdout.print("    -e/--envvar          VAR=VALUE Environment variable to use at remote site\n", .{});
         try self.env.stdout.print("Developed by Geert Fannes.\n", .{});
     }
 };

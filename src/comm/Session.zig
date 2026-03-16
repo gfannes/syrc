@@ -359,11 +359,16 @@ fn doRun(self: *Self, run: prot.Run, folder: []const u8) !void {
     var folder_dir = try std.Io.Dir.cwd().createDirPathOpen(self.env.io, folder, .{});
     defer folder_dir.close(self.env.io);
 
+    var environ_map = try self.env.envmap.clone(self.env.a);
+    // &todo: set envvars from client
+    // try environ_map.put("auro_j", "1");
+
     const options = std.process.SpawnOptions{
         .argv = argv.items,
         .cwd = .{ .dir = folder_dir },
         .stdout = .pipe,
         .stderr = .pipe,
+        .environ_map = &environ_map,
     };
 
     var proc = try std.process.spawn(self.env.io, options);
@@ -583,7 +588,7 @@ const Output = struct {
 
             switch (kind) {
                 .stdout => try outw.writeAll("\u{1f7e3}"), // Purple dot
-                .stderr => try errw.writeAll("\u{1f7c0}"), // Orange dot
+                .stderr => try errw.writeAll("\u{1f7e0}"), // Orange dot
             }
             self.maybe_kind = kind;
         }
