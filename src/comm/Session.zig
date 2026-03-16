@@ -582,8 +582,8 @@ const Output = struct {
                 return;
 
             switch (kind) {
-                .stdout => try outw.writeAll("\u{1f7e2}"),
-                .stderr => try errw.writeAll("\u{1f534}"),
+                .stdout => try outw.writeAll("\u{1f7e3}"), // Purple dot
+                .stderr => try errw.writeAll("\u{1f7c0}"), // Orange dot
             }
             self.maybe_kind = kind;
         }

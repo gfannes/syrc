@@ -1,4 +1,4 @@
-// Output from `rake export[walker,cli,Log,profile,naft,util,comm,pipe,fs,fmt,Env]` from https://github.com/gfannes/rubr from 2026-03-15
+// Output from `rake export[walker,cli,Log,profile,naft,util,comm,pipe,fs,fmt,Env]` from https://github.com/gfannes/rubr from 2026-03-16
 
 const std = @import("std");
 const builtin = @import("builtin");
@@ -393,6 +393,15 @@ pub const Env = struct {
             return duration.nanoseconds;
         }
     };
+    
+    pub fn for_ut() Env_ {
+        const ut = std.testing;
+        return .{
+            .a = ut.allocator,
+            .aa = ut.allocator,
+            .io = ut.io,
+        };
+    }
     
     pub fn duration_ns(env: Env_) i96 {
         const inst: *const Instance = @alignCast(@fieldParentPtr("log", env.log));

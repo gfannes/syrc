@@ -156,20 +156,19 @@ pub const Store = struct {
 
 test "blob.Store" {
     const ut = std.testing;
-    const a = ut.allocator;
-    const io = ut.io;
+    const env = rubr.Env.for_ut();
 
-    var store = Store.init(a);
+    var store = Store.init(env);
     defer store.deinit();
 
     const path = "tmp/store";
 
     // Ensure `path` does not exist
-    try rubr.fs.deleteTree(path);
-    try ut.expect(!rubr.fs.isDirectory(path));
+    try rubr.fs.deleteTree(env.io, path);
+    try ut.expect(!rubr.fs.isDirectory(env.io, path));
 
     try store.open(path);
-    try ut.expect(rubr.fs.isDirectory(path));
+    try ut.expect(rubr.fs.isDirectory(env.io, path));
 
     try ut.expect(store.dir != null);
 
@@ -184,8 +183,8 @@ test "blob.Store" {
     try store.addFile(key, "Hello Store");
     try ut.expect(store.hasFile(key));
 
-    var dst_dir = try std.Io.Dir.cwd().createDirPathOpen(io, "tmp/repro", .{});
-    defer dst_dir.close(io);
+    var dst_dir = try std.Io.Dir.cwd().createDirPathOpen(env.io, "tmp/repro", .{});
+    defer dst_dir.close(env.io);
 
     try ut.expect(try store.extractFile(key, dst_dir, "myfile.txt", null));
 }
