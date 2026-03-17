@@ -339,10 +339,14 @@ pub const Run = struct {
     const Self = @This();
     pub const Id = 12;
     pub const Args = std.ArrayList([]const u8);
+    pub const Defines = std.ArrayList(struct { []const u8, []const u8 });
+    pub const Undefs = std.ArrayList([]const u8);
 
     a: std.mem.Allocator,
     cmd: []const u8 = &.{},
     args: Args = .empty,
+    defines: Defines = .empty,
+    undefs: Undefs = .empty,
 
     pub fn init(a: std.mem.Allocator) Self {
         return Self{ .a = a };
@@ -352,6 +356,14 @@ pub const Run = struct {
         for (self.args.items) |arg|
             self.a.free(arg);
         self.args.deinit(self.a);
+        for (self.defines.items) |define| {
+            self.a.free(define[0]);
+            self.a.free(define[1]);
+        }
+        self.defines.deinit(self.a);
+        for (self.undefs.items) |undef|
+            self.a.free(undef);
+        self.undefs.deinit(self.a);
     }
 
     pub fn write(self: Self, parent: *rubr.naft.Node) void {
@@ -360,26 +372,73 @@ pub const Run = struct {
         node.attr("cmd", self.cmd);
         for (self.args.items) |arg|
             node.attr("arg", arg);
+        for (self.defines.items) |define| {
+            var dn = node.node("Define");
+            defer dn.deinit();
+            node.attr("key", define[0]);
+            node.attr("value", define[1]);
+        }
+        for (self.undefs.items) |undef| {
+            var dn = node.node("Undef");
+            defer dn.deinit();
+            node.attr("key", undef);
+        }
     }
 
     pub fn writeComposite(self: Self, tw: anytype) !void {
         try tw.writeLeaf(self.cmd, 3);
         try tw.writeLeaf(self.args.items.len, 5);
         for (self.args.items) |arg|
-            try tw.writeLeaf(arg, 7);
+            try tw.writeLeaf(arg, 5);
+        try tw.writeLeaf(self.defines.items.len, 7);
+        for (self.defines.items) |define| {
+            try tw.writeLeaf(define[0], 7);
+            try tw.writeLeaf(define[1], 7);
+        }
+        try tw.writeLeaf(self.defines.items.len, 9);
+        for (self.undefs.items) |udef|
+            try tw.writeLeaf(udef, 9);
     }
     pub fn readComposite(self: *Self, tr: anytype) !void {
         if (!try tr.readLeaf(&self.cmd, 3, self.a))
             return Error.ExpectedCmd;
 
         var count: usize = undefined;
-        if (!try tr.readLeaf(&count, 5, {}))
-            return Error.ExpectedCount;
 
-        try self.args.resize(self.a, count);
-        for (self.args.items) |*arg| {
-            if (!try tr.readLeaf(arg, 7, self.a))
-                return Error.ExpectedArg;
+        {
+            const id = 5;
+            if (!try tr.readLeaf(&count, id, {}))
+                return Error.ExpectedCount;
+
+            try self.args.resize(self.a, count);
+            for (self.args.items) |*arg| {
+                if (!try tr.readLeaf(arg, id, self.a))
+                    return Error.ExpectedArg;
+            }
+        }
+        {
+            const id = 7;
+            if (!try tr.readLeaf(&count, id, {}))
+                return Error.ExpectedCount;
+
+            try self.defines.resize(self.a, count);
+            for (self.defines.items) |*define| {
+                if (!try tr.readLeaf(define[0], id, self.a))
+                    return Error.ExpectedKey;
+                if (!try tr.readLeaf(define[1], id, self.a))
+                    return Error.ExpectedValue;
+            }
+        }
+        {
+            const id = 9;
+            if (!try tr.readLeaf(&count, id, {}))
+                return Error.ExpectedCount;
+
+            try self.undefs.resize(self.a, count);
+            for (self.undefs.items) |*undef| {
+                if (!try tr.readLeaf(undef, id, self.a))
+                    return Error.ExpectedKey;
+            }
         }
     }
 };
