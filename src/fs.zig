@@ -89,7 +89,6 @@ pub fn collectTree(env: Env, folder: []const u8) !Tree {
 
                 // &todo fix execute mode
                 filestate.attributes = .{
-                    .read = true,
                     .write = !stat.permissions.readOnly(),
                     .execute = false,
                 };

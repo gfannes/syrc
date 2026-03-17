@@ -133,7 +133,7 @@ pub const Store = struct {
 
             if (attributes) |attr| {
                 var permissions = std.Io.File.Permissions.default_file;
-                permissions = permissions.setReadOnly(attr.read);
+                permissions = permissions.setReadOnly(!attr.write);
                 // &todo support executable permission
                 if (builtin.os.tag != .windows)
                     try file.setPermissions(self.env.io, permissions);

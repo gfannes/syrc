@@ -118,7 +118,6 @@ pub const FileState = struct {
     const Self = @This();
     pub const Id = 6;
     pub const Attributes = struct {
-        read: bool = true,
         write: bool = false,
         execute: bool = false,
     };
@@ -162,9 +161,7 @@ pub const FileState = struct {
             try tw.writeLeaf(self.name, 7);
 
         if (self.attributes) |attributes| {
-            var flags: u3 = 0;
-            flags <<= 1;
-            flags += if (attributes.read) 1 else 0;
+            var flags: u2 = 0;
             flags <<= 1;
             flags += if (attributes.write) 1 else 0;
             flags <<= 1;
@@ -199,10 +196,9 @@ pub const FileState = struct {
             self.name = &.{};
 
         {
-            var flags: u3 = undefined;
+            var flags: u2 = undefined;
             self.attributes = if (try tr.readLeaf(&flags, 9, {}))
                 .{
-                    .read = flags & (1 << 2) != 0,
                     .write = flags & (1 << 1) != 0,
                     .execute = flags & (1 << 0) != 0,
                 }
@@ -244,9 +240,7 @@ pub const FileState = struct {
         if (self.content) |content|
             node.attr("content_size", content.len);
         if (self.attributes) |attributes| {
-            var attr: [3]u8 = .{ '-', '-', '-' };
-            if (attributes.read)
-                attr[0] = 'r';
+            var attr: [3]u8 = .{ 'r', '-', '-' };
             if (attributes.write)
                 attr[1] = 'w';
             if (attributes.execute)
