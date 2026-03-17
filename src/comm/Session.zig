@@ -3,6 +3,7 @@ const prot = @import("../prot.zig");
 const fs = @import("../fs.zig");
 const blob = @import("../blob.zig");
 const crypto = @import("../crypto.zig");
+const dto = @import("../dto.zig");
 const rubr = @import("../rubr.zig");
 const Env = rubr.Env;
 const Io = @import("Io.zig");
@@ -55,7 +56,7 @@ pub fn deinit(self: *Self) void {
         stream.close(self.env.io);
 }
 
-pub fn runClient(self: *Self, name: ?[]const u8, reset_folder: bool, cleanup_folder: bool, reset_store: bool, collect: bool) !void {
+pub fn runClient(self: *Self, name: ?[]const u8, reset_folder: bool, cleanup_folder: bool, reset_store: bool, collect: bool, defines: []dto.Define) !void {
     var bye = prot.Bye.init(self.env.a);
     defer bye.deinit();
 
@@ -104,6 +105,12 @@ pub fn runClient(self: *Self, name: ?[]const u8, reset_folder: bool, cleanup_fol
         run.cmd = try run.a.dupe(u8, cmd);
         for (self.args) |arg|
             try run.args.append(self.env.a, try run.a.dupe(u8, arg));
+        for (defines) |define| {
+            var copy: dto.Define = .{ .key = try run.a.dupe(u8, define.key) };
+            if (define.value) |value|
+                copy.value = try run.a.dupe(u8, value);
+            try run.defines.append(self.env.a, copy);
+        }
 
         try self.cio.send(run);
         if (self.env.log.level(1)) |w| {
@@ -360,8 +367,13 @@ fn doRun(self: *Self, run: prot.Run, folder: []const u8) !void {
     defer folder_dir.close(self.env.io);
 
     var environ_map = try self.env.envmap.clone(self.env.a);
-    // &todo: set envvars from client
-    // try environ_map.put("auro_j", "1");
+    for (run.defines.items) |define| {
+        if (define.value) |value| {
+            try environ_map.put(define.key, value);
+        } else {
+            _ = environ_map.swapRemove(define.key);
+        }
+    }
 
     const options = std.process.SpawnOptions{
         .argv = argv.items,

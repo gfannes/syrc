@@ -83,6 +83,7 @@ pub const App = struct {
                 self.args.cleanup_folder,
                 self.args.reset_store,
                 self.args.collect,
+                self.args.defines.items,
             },
         );
         defer client_thread.join();
@@ -123,6 +124,7 @@ pub const App = struct {
             self.args.cleanup_folder,
             self.args.reset_store,
             self.args.collect,
+            self.args.defines.items,
         );
     }
 

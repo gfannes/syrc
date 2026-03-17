@@ -1,5 +1,6 @@
 const std = @import("std");
 const crypto = @import("crypto.zig");
+const dto = @import("dto.zig");
 const rubr = @import("rubr.zig");
 
 pub const Error = error{
@@ -334,8 +335,7 @@ pub const Run = struct {
     const Self = @This();
     pub const Id = 12;
     pub const Args = std.ArrayList([]const u8);
-    pub const Define = struct { key: []const u8, value: ?[]const u8 };
-    pub const Defines = std.ArrayList(Define);
+    pub const Defines = std.ArrayList(dto.Define);
 
     a: std.mem.Allocator,
     cmd: []const u8 = &.{},
@@ -371,10 +371,10 @@ pub const Run = struct {
         for (self.defines.items) |define| {
             var dn = node.node("Variable");
             defer dn.deinit();
-            node.attr("type", if (define.value == null) "undef" else "define");
-            node.attr("key", define.key);
+            dn.attr("type", if (define.value == null) "undef" else "define");
+            dn.attr("key", define.key);
             if (define.value) |value|
-                node.attr("value", value);
+                dn.attr("value", value);
         }
     }
 
@@ -423,7 +423,7 @@ pub const Run = struct {
                     return Error.ExpectedKey;
 
                 var value: []const u8 = undefined;
-                if (!try tr.readLeaf(&value, 13, self.a))
+                if (try tr.readLeaf(&value, 13, self.a))
                     define.value = value;
             }
         }

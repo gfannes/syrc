@@ -1,4 +1,5 @@
 const std = @import("std");
+const dto = @import("dto.zig");
 const rubr = @import("rubr.zig");
 const Env = rubr.Env;
 
@@ -45,8 +46,7 @@ pub const Args = struct {
     reset_store: bool = false,
     collect: bool = false,
     store_path: []const u8 = Default.store_dir,
-    defines: Strings = .empty,
-    undefs: Strings = .empty,
+    defines: std.ArrayList(dto.Define) = .empty,
     extra: Strings = .empty,
 
     pub fn init(self: *Self) void {
@@ -88,11 +88,15 @@ pub const Args = struct {
                 } else if (arg.is("-s", "--store")) {
                     self.store_path = (self.args.pop() orelse return Error.ExpectedFolder).arg;
                 } else if (arg.is("-d", "--define")) {
-                    const define = (self.args.pop() orelse return Error.ExpectedDefine);
-                    try self.defines.append(self.env.aa, define.arg);
+                    const value = (self.args.pop() orelse return Error.ExpectedDefine).arg;
+                    const define: dto.Define = if (std.mem.findScalar(u8, value, '=')) |ix|
+                        .{ .key = value[0..ix], .value = value[ix + 1 ..] }
+                    else
+                        .{ .key = value, .value = &.{} };
+                    try self.defines.append(self.env.aa, define);
                 } else if (arg.is("-D", "--undef")) {
-                    const undef = (self.args.pop() orelse return Error.ExpectedUndef);
-                    try self.undefs.append(self.env.aa, undef.arg);
+                    const value = (self.args.pop() orelse return Error.ExpectedUndef).arg;
+                    try self.defines.append(self.env.aa, .{ .key = value });
                 } else if (arg.is("-m", "--mode")) {
                     const mode = (self.args.pop() orelse return Error.ExpectedMode);
                     self.mode = if (mode.is("clnt", "client"))
