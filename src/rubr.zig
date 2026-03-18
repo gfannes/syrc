@@ -1,4 +1,4 @@
-// Output from `rake export[walker,cli,Log,profile,naft,util,comm,pipe,fs,fmt,Env]` from https://github.com/gfannes/rubr from 2026-03-17
+// Output from `rake export[walker,cli,Log,profile,naft,util,comm,pipe,fs,fmt,Env]` from https://github.com/gfannes/rubr from 2026-03-18
 
 const std = @import("std");
 const builtin = @import("builtin");
@@ -1777,6 +1777,7 @@ pub const fs = struct {
     pub const Error = error{
         BufferTooSmall,
         CouldNotFindHome,
+        CouldNotReadAll,
     };
     
     pub const Path = struct {
@@ -1820,6 +1821,34 @@ pub const fs = struct {
     
         pub fn path(self: *const Self) []const u8 {
             return self.buffer[0..self.len];
+        }
+    
+        pub fn exists(self: *const Self, env: Env) bool {
+            const file = std.Io.Dir.openFileAbsolute(env.io, self.path(), .{}) catch return false;
+            defer file.close(env.io);
+            return true;
+        }
+    
+        pub fn read(self: *const Self, env: Env) ![]u8 {
+            const file = try std.Io.Dir.openFileAbsolute(env.io, self.path(), .{});
+            defer file.close(env.io);
+            const stat = try file.stat(env.io);
+            const content = try env.a.alloc(u8, stat.size);
+            const size = try file.readPositionalAll(env.io, content, 0);
+            if (size != stat.size)
+                return error.CouldNotReadAll;
+            return content;
+        }
+        pub fn readSentinel(self: *const Self, env: Env) ![:0]u8 {
+            const file = try std.Io.Dir.openFileAbsolute(env.io, self.path(), .{});
+            defer file.close(env.io);
+            const stat = try file.stat(env.io);
+            const content = try env.a.alloc(u8, stat.size + 1);
+            const size = try file.readPositionalAll(env.io, content[0..stat.size], 0);
+            if (size != stat.size)
+                return error.CouldNotReadAll;
+            content[stat.size] = 0;
+            return content[0..stat.size :0];
         }
     };
     
