@@ -49,9 +49,18 @@ pub fn init(self: *Self, stream: std.Io.net.Stream) !void {
     self.stream = stream;
     self.cio = Io{ .env = self.env };
     self.cio.init(stream);
+
+    const sigaction = std.posix.Sigaction{
+        .handler = .{ .handler = onSigInt },
+        .mask = std.posix.sigemptyset(),
+        .flags = 0,
+    };
+    std.posix.sigaction(std.posix.SIG.INT, &sigaction, null);
 }
 
 pub fn deinit(self: *Self) void {
+    std.posix.sigaction(std.posix.SIG.INT, null, null);
+
     if (self.stream) |*stream|
         stream.close(self.env.io);
 }
@@ -606,3 +615,12 @@ const Output = struct {
         }
     };
 };
+
+var signal_int_count: u32 = 0;
+fn onSigInt(_: std.posix.SIG) callconv(.c) void {
+    signal_int_count += 1;
+    std.debug.print("Caught interrupt signal (count: {})\n", .{signal_int_count});
+    if (signal_int_count > 4) {
+        std.process.fatal("Too many interrupt signals received, aborting...", .{});
+    }
+}
