@@ -22,13 +22,16 @@ pub fn main(init: std.process.Init) !void {
     var cli_args = cli.Args{ .env = env };
     cli_args.init();
     try cli_args.parse(init.minimal.args);
+    env_inst.log.setLevel(cli_args.verbose);
+    if (cfg_loader.aliases) |aliases|
+        if (cli_args.update(aliases))
+            if (env.log.level(1)) |w|
+                try w.print("Found alias for '{s}'\n", .{cli_args.ip});
 
     if (cli_args.print_help) {
         try cli_args.printHelp();
         return;
     }
-
-    env_inst.log.setLevel(cli_args.verbose);
 
     var my_app = app.App.init(
         env,

@@ -1,5 +1,6 @@
 const std = @import("std");
 const dto = @import("dto.zig");
+const cfg = @import("cfg.zig");
 const rubr = @import("rubr.zig");
 const Env = rubr.Env;
 
@@ -37,7 +38,7 @@ pub const Args = struct {
     verbose: usize = 0,
     base: []const u8 = &.{},
     name: []const u8 = Default.name,
-    ip: []const u8 = Default.ip,
+    ip: []const u8 = &.{},
     port: u16 = Default.port,
     mode: Mode = Mode.Client,
     j: usize = 0,
@@ -113,6 +114,12 @@ pub const Args = struct {
                     is_extra = true;
                     continue;
                 } else {
+                    if (!is_extra) {
+                        if (self.ip.len == 0) {
+                            self.ip = arg.arg;
+                            continue;
+                        }
+                    }
                     is_extra = true;
                 }
             }
@@ -133,6 +140,19 @@ pub const Args = struct {
             if (self.env.log.level(1)) |w|
                 try w.print("Store will be stored in '{s}'\n", .{self.store_path});
         }
+
+        if (self.ip.len == 0)
+            self.ip = Default.ip;
+    }
+
+    pub fn update(self: *Self, aliases: cfg.Aliases) bool {
+        for (aliases.aliases) |alias| {
+            if (std.mem.eql(u8, self.ip, alias.name)) {
+                self.ip = alias.ip;
+                return true;
+            }
+        }
+        return false;
     }
 
     pub fn printHelp(self: Self) !void {
