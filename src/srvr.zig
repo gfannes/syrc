@@ -18,6 +18,7 @@ pub const Server = struct {
     address: std.Io.net.IpAddress,
     store: *blob.Store,
     folder: []const u8,
+    name: []const u8,
 
     server: ?std.Io.net.Server = null,
 
@@ -44,6 +45,7 @@ pub const Server = struct {
             .env = self.env,
             .store = self.store,
             .base = self.folder,
+            .name = self.name,
         };
         defer session.deinit();
 

@@ -7,6 +7,7 @@ pub const Error = error{
     ExpectedString,
     ExpectedVersion,
     ExpectedRole,
+    ExpectedName,
     ExpectedStatus,
     ExpectedFileState,
     ExpectedIX,
@@ -32,9 +33,12 @@ pub const Hello = struct {
     pub const Role = enum { Client, Server, Broker };
     pub const Status = enum { Ok, Pending, Fail };
 
+    a: std.mem.Allocator,
     version: u32 = My.version,
-    role: Role,
-    status: Status,
+    role: Role = undefined,
+    status: Status = undefined,
+    name: []const u8 = &.{},
+    suffix: ?[]const u8 = null,
 
     pub fn write(self: Self, parent: *rubr.naft.Node) void {
         var node = parent.node("prot.Hello");
@@ -42,25 +46,38 @@ pub const Hello = struct {
         node.attr("version", self.version);
         node.attr("role", self.role);
         node.attr("status", self.status);
+        node.attr("name", self.name);
+        if (self.suffix) |suffix|
+            node.attr("suffix", suffix);
     }
     pub fn writeComposite(self: Self, tw: anytype) !void {
         try tw.writeLeaf(self.version, 3);
         try tw.writeLeaf(@intFromEnum(self.role), 3);
         try tw.writeLeaf(@intFromEnum(self.status), 3);
+        try tw.writeLeaf(self.name, 3);
+        if (self.suffix) |suffix|
+            try tw.writeLeaf(suffix, 5);
     }
     pub fn readComposite(self: *Self, tr: anytype) !void {
         if (!try tr.readLeaf(&self.version, 3, {}))
-            return Error.ExpectedVersion;
+            return error.ExpectedVersion;
 
         var u: u32 = undefined;
 
         if (!try tr.readLeaf(&u, 3, {}))
-            return Error.ExpectedRole;
+            return error.ExpectedRole;
         self.role = @enumFromInt(u);
 
         if (!try tr.readLeaf(&u, 3, {}))
-            return Error.ExpectedStatus;
+            return error.ExpectedStatus;
         self.status = @enumFromInt(u);
+
+        if (!try tr.readLeaf(&self.name, 3, self.a))
+            return error.ExpectedName;
+
+        var str: []const u8 = undefined;
+        if (try tr.readLeaf(&str, 5, self.a))
+            self.suffix = str;
     }
 };
 
@@ -68,50 +85,32 @@ pub const Sync = struct {
     const Self = @This();
     pub const Id = 4;
 
-    a: std.mem.Allocator,
-    subdir: ?[]const u8 = null,
     reset_folder: bool = false,
     cleanup_folder: bool = false,
     reset_store: bool = false,
 
-    pub fn init(a: std.mem.Allocator) Self {
-        return Self{ .a = a };
-    }
-    pub fn deinit(self: *Self) void {
-        if (self.subdir) |subdir|
-            self.a.free(subdir);
-    }
-
     pub fn write(self: Self, parent: *rubr.naft.Node) void {
         var node = parent.node("prot.Sync");
         defer node.deinit();
-        if (self.subdir) |subdir|
-            node.attr("base", subdir);
         node.attr("reset_folder", self.reset_folder);
         node.attr("cleanup_folder", self.cleanup_folder);
         node.attr("reset_store", self.reset_store);
     }
 
     pub fn writeComposite(self: Self, tw: anytype) !void {
-        if (self.subdir) |subdir|
-            try tw.writeLeaf(subdir, 3);
-        try tw.writeLeaf(self.reset_folder, 5);
-        try tw.writeLeaf(self.cleanup_folder, 7);
-        try tw.writeLeaf(self.reset_store, 9);
+        try tw.writeLeaf(self.reset_folder, 3);
+        try tw.writeLeaf(self.cleanup_folder, 3);
+        try tw.writeLeaf(self.reset_store, 3);
     }
     pub fn readComposite(self: *Self, tr: anytype) !void {
-        var subdir: []const u8 = &.{};
-        if (try tr.readLeaf(&subdir, 3, self.a))
-            self.subdir = subdir;
+        if (!try tr.readLeaf(&self.reset_folder, 3, {}))
+            return error.ExpectedFlag;
 
-        if (!try tr.readLeaf(&self.reset_folder, 5, {}))
-            return Error.ExpectedFlag;
+        if (!try tr.readLeaf(&self.cleanup_folder, 3, {}))
+            return error.ExpectedFlag;
 
-        if (!try tr.readLeaf(&self.cleanup_folder, 7, {}))
-            return Error.ExpectedFlag;
-
-        if (!try tr.readLeaf(&self.reset_store, 9, {}))
-            return Error.ExpectedFlag;
+        if (!try tr.readLeaf(&self.reset_store, 3, {}))
+            return error.ExpectedFlag;
     }
 };
 
@@ -221,7 +220,7 @@ pub const FileState = struct {
             var checksum: []const u8 = &.{};
             if (try tr.readLeaf(&checksum, 13, fba.allocator())) {
                 if (checksum.len != buf.len)
-                    return Error.WrongChecksumSize;
+                    return error.WrongChecksumSize;
                 self.checksum = buf;
             } else {
                 self.checksum = null;
@@ -324,7 +323,7 @@ pub const Content = struct {
         else
             null;
 
-        const a = self.a orelse return Error.NoAllocatorSet;
+        const a = self.a orelse return error.NoAllocatorSet;
         var str: []const u8 = &.{};
         if (try tr.readLeaf(&str, 5, a))
             self.str = str;
@@ -398,29 +397,29 @@ pub const Run = struct {
     }
     pub fn readComposite(self: *Self, tr: anytype) !void {
         if (!try tr.readLeaf(&self.cmd, 3, self.a))
-            return Error.ExpectedCmd;
+            return error.ExpectedCmd;
 
         var count: usize = undefined;
 
         {
             if (!try tr.readLeaf(&count, 5, {}))
-                return Error.ExpectedCount;
+                return error.ExpectedCount;
 
             try self.args.resize(self.a, count);
             for (self.args.items) |*arg| {
                 if (!try tr.readLeaf(arg, 7, self.a))
-                    return Error.ExpectedArg;
+                    return error.ExpectedArg;
             }
         }
 
         {
             if (!try tr.readLeaf(&count, 9, {}))
-                return Error.ExpectedCount;
+                return error.ExpectedCount;
 
             try self.defines.resize(self.a, count);
             for (self.defines.items) |*define| {
                 if (!try tr.readLeaf(&define.key, 11, self.a))
-                    return Error.ExpectedKey;
+                    return error.ExpectedKey;
 
                 var value: []const u8 = undefined;
                 if (try tr.readLeaf(&value, 13, self.a))
@@ -562,7 +561,7 @@ pub const Bye = struct {
 
     pub fn setReason(self: *Self, comptime fmt: []const u8, args: anytype) !void {
         if (self.reason != null)
-            return Error.ReasonAlreadySet;
+            return error.ReasonAlreadySet;
         self.reason = try std.fmt.allocPrint(self.a, fmt, args);
     }
 

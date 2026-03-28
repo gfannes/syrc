@@ -36,6 +36,9 @@ env: Env,
 store: *blob.Store,
 base: []const u8,
 
+name: []const u8,
+suffix: ?[]const u8 = null,
+
 stream: ?std.Io.net.Stream = null,
 cio: Io = undefined,
 maybe_cmd: ?[]const u8 = null,
@@ -65,15 +68,20 @@ pub fn deinit(self: *Self) void {
         stream.close(self.env.io);
 }
 
-pub fn runClient(self: *Self, name: ?[]const u8, reset_folder: bool, cleanup_folder: bool, reset_store: bool, collect: bool, defines: []dto.Define) !void {
+pub fn runClient(self: *Self, reset_folder: bool, cleanup_folder: bool, reset_store: bool, collect: bool, defines: []dto.Define) !void {
+    std.debug.print("session.runClient\n", .{});
     var bye = prot.Bye.init(self.env.a);
     defer bye.deinit();
 
     // Handshake
     {
-        try self.cio.send(prot.Hello{ .role = .Client, .status = .Pending });
+        var aa = std.heap.ArenaAllocator.init(self.env.a);
+        defer aa.deinit();
+        const a = aa.allocator();
 
-        var hello: prot.Hello = undefined;
+        try self.cio.send(prot.Hello{ .a = a, .role = .Client, .status = .Pending, .name = self.name, .suffix = self.suffix });
+
+        var hello: prot.Hello = .{ .a = a };
         if (try self.cio.receive2(&hello, &bye)) {
             if (self.env.log.level(1)) |w|
                 prot.printMessage(hello, w, null);
@@ -91,11 +99,8 @@ pub fn runClient(self: *Self, name: ?[]const u8, reset_folder: bool, cleanup_fol
 
     // Sync
     {
-        var sync = prot.Sync.init(self.env.a);
-        defer sync.deinit();
+        var sync: prot.Sync = .{};
 
-        if (name) |str|
-            sync.subdir = try sync.a.dupe(u8, str);
         sync.reset_folder = reset_folder;
         sync.cleanup_folder = cleanup_folder;
         sync.reset_store = reset_store;
@@ -180,7 +185,11 @@ pub fn runServer(self: *Self) !void {
 
     // Handshake
     {
-        var hello: prot.Hello = undefined;
+        var aa = std.heap.ArenaAllocator.init(self.env.a);
+        defer aa.deinit();
+        const a = aa.allocator();
+
+        var hello: prot.Hello = .{ .a = a };
         if (try self.cio.receive2(&hello, &bye)) {
             if (self.env.log.level(1)) |w|
                 prot.printMessage(hello, w, null);
@@ -189,7 +198,7 @@ pub fn runServer(self: *Self) !void {
                 try self.cio.send(bye);
                 return error.VersionMismatch;
             }
-            try self.cio.send(prot.Hello{ .role = .Client, .status = .Ok });
+            try self.cio.send(prot.Hello{ .a = self.env.a, .role = .Client, .status = .Ok, .name = self.name, .suffix = self.suffix });
         } else {
             if (self.env.log.level(1)) |w|
                 prot.printMessage(bye, w, null);
@@ -201,11 +210,7 @@ pub fn runServer(self: *Self) !void {
     var folder: []const u8 = &.{};
     defer self.env.a.free(folder);
     {
-        var aa = std.heap.ArenaAllocator.init(self.env.a);
-        defer aa.deinit();
-        const a = aa.allocator();
-
-        var sync = prot.Sync.init(a);
+        var sync: prot.Sync = .{};
 
         if (!try self.cio.receive(&sync))
             return error.ExpectedSync;
@@ -218,13 +223,12 @@ pub fn runServer(self: *Self) !void {
         }
 
         {
-            const subdir = sync.subdir orelse return error.SyncToRootNotSupportedYet;
-            if (subdir.len == 0)
-                return error.EmptySubdir;
-            if (std.fs.path.isAbsolute(subdir))
-                return error.OnlyRelativePathAllowed;
+            // &todo: use hello.name and suffix iso tmp
+            folder = try std.fs.path.join(self.env.a, &[_][]const u8{ self.base, "syrc-tmp" });
 
-            folder = try std.fs.path.join(self.env.a, &[_][]const u8{ self.base, subdir });
+            var aa = std.heap.ArenaAllocator.init(self.env.a);
+            defer aa.deinit();
+            const a = aa.allocator();
 
             try self.receiveFolderFromPeer(a, folder, sync.reset_folder);
         }

@@ -20,7 +20,7 @@ pub const Error = error{
 
 const Default = struct {
     const port: u16 = 1357;
-    const ip: []const u8 = "0.0.0.0";
+    const ip: []const u8 = "127.0.0.1";
     const store_dir: []const u8 = ".cache/syrc/blob";
     const name: []const u8 = "syrc-tmp";
 };

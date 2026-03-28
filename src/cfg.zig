@@ -37,10 +37,11 @@ pub const Loader = struct {
             var f = dir;
             try f.add("config.zon");
             if (f.exists(self.env)) {
-                std.debug.print("Loading {s}\n", .{f.path()});
+                std.debug.print("Loading {s} ... ", .{f.path()});
                 const content = try f.readSentinel(self.env);
                 defer self.env.a.free(content);
                 self.config = try std.zon.parse.fromSliceAlloc(Config, self.env.a, content, null, .{});
+                std.debug.print("done\n", .{});
             }
         }
 
@@ -48,10 +49,11 @@ pub const Loader = struct {
             var f = dir;
             try f.add("aliases.zon");
             if (f.exists(self.env)) {
-                std.debug.print("Loading {s}\n", .{f.path()});
+                std.debug.print("Loading {s} ... ", .{f.path()});
                 const content = try f.readSentinel(self.env);
                 defer self.env.a.free(content);
                 self.aliases = try std.zon.parse.fromSliceAlloc(Aliases, self.env.a, content, null, .{});
+                std.debug.print("done\n", .{});
             }
         }
     }

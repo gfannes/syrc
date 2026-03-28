@@ -57,6 +57,7 @@ pub const App = struct {
             .address = addr,
             .store = try self.gocStore(),
             .folder = self.args.base,
+            .name = "testserver",
         };
         defer server.deinit();
         try server.init();
@@ -69,7 +70,7 @@ pub const App = struct {
             .address = addr,
         };
         defer client.deinit();
-        try client.init(self.args.base, try self.gocStore());
+        try client.init(self.args.base, try self.gocStore(), "testclient");
 
         client.setRunCommand(self.args.extra.items);
 
@@ -78,7 +79,6 @@ pub const App = struct {
             comm.Session.runClient,
             .{
                 &client.session,
-                self.args.name,
                 self.args.reset_folder,
                 self.args.cleanup_folder,
                 self.args.reset_store,
@@ -95,6 +95,7 @@ pub const App = struct {
             .address = try self.address(),
             .store = try self.gocStore(),
             .folder = self.args.base,
+            .name = "server",
         };
         defer server.deinit();
         try server.init();
@@ -109,17 +110,17 @@ pub const App = struct {
     }
 
     fn runClient(self: *Self) !void {
+        std.debug.print("app.runClient\n", .{});
         var client = clnt.Client{
             .env = self.env,
             .address = try self.address(),
         };
         defer client.deinit();
-        try client.init(self.args.base, try self.gocStore());
+        try client.init(self.args.base, try self.gocStore(), "client");
 
         client.setRunCommand(self.args.extra.items);
 
         try client.session.runClient(
-            self.args.name,
             self.args.reset_folder,
             self.args.cleanup_folder,
             self.args.reset_store,
@@ -148,6 +149,7 @@ pub const App = struct {
     }
 
     fn address(self: Self) !std.Io.net.IpAddress {
+        std.debug.print("ip: {s}\n", .{self.args.ip});
         return try std.Io.net.IpAddress.resolve(self.env.io, self.args.ip, self.args.port);
     }
 
