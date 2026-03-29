@@ -146,8 +146,8 @@ pub const Args = struct {
             self.ip = Default.ip;
     }
 
-    pub fn update(self: *Self, aliases: cfg.Aliases) bool {
-        for (aliases.aliases) |alias| {
+    pub fn update(self: *Self, aliases: []const cfg.Config.Alias) bool {
+        for (aliases) |alias| {
             if (std.mem.eql(u8, self.ip, alias.name)) {
                 self.ip = alias.ip;
                 return true;

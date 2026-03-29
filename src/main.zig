@@ -23,8 +23,8 @@ pub fn main(init: std.process.Init) !void {
     cli_args.init();
     try cli_args.parse(init.minimal.args);
     env_inst.log.setLevel(cli_args.verbose);
-    if (cfg_loader.aliases) |aliases|
-        if (cli_args.update(aliases))
+    if (cfg_loader.config) |config|
+        if (cli_args.update(config.aliases))
             if (env.log.level(1)) |w|
                 try w.print("Found alias for '{s}'\n", .{cli_args.ip});
 
