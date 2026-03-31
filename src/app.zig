@@ -1,15 +1,16 @@
 const std = @import("std");
-const cli = @import("cli.zig");
-const rubr = @import("rubr.zig");
-const fs = @import("fs.zig");
-const prot = @import("prot.zig");
-const crypto = @import("crypto.zig");
-const srvr = @import("srvr.zig");
+
+const blob = @import("blob.zig");
+const cfg = @import("cfg.zig");
 const clnt = @import("clnt.zig");
 const comm = @import("comm.zig");
 const cpy = @import("cpy.zig");
-const blob = @import("blob.zig");
+const crypto = @import("crypto.zig");
+const fs = @import("fs.zig");
+const prot = @import("prot.zig");
+const rubr = @import("rubr.zig");
 const Env = rubr.Env;
+const srvr = @import("srvr.zig");
 
 pub const Error = error{
     ExpectedSync,
@@ -21,14 +22,14 @@ pub const App = struct {
     const Self = @This();
 
     env: Env,
-    args: cli.Args,
+    config: *const cfg.Config,
     server: ?std.Io.net.Server = null,
     store: ?blob.Store = null,
 
-    pub fn init(env: Env, args: cli.Args) Self {
+    pub fn init(env: Env, config: *const cfg.Config) Self {
         return Self{
             .env = env,
-            .args = args,
+            .config = config,
         };
     }
     pub fn deinit(self: *Self) void {
@@ -39,13 +40,13 @@ pub const App = struct {
     }
 
     pub fn run(self: *Self) !void {
-        try self.env.log.info("Running mode {any}\n", .{self.args.mode});
+        try self.env.log.info("Running mode {any}\n", .{self.config.mode});
 
-        switch (self.args.mode) {
-            cli.Mode.Client => try self.runClient(),
-            cli.Mode.Server => try self.runServer(),
-            cli.Mode.Check => try self.runCheck(),
-            cli.Mode.Test => try self.runTest(),
+        switch (self.config.mode) {
+            cfg.Mode.Client => try self.runClient(),
+            cfg.Mode.Server => try self.runServer(),
+            cfg.Mode.Check => try self.runCheck(),
+            cfg.Mode.Test => try self.runTest(),
         }
     }
 
@@ -56,7 +57,7 @@ pub const App = struct {
             .env = self.env,
             .address = addr,
             .store = try self.gocStore(),
-            .folder = self.args.base,
+            .folder = self.config.base,
             .name = "testserver",
         };
         defer server.deinit();
@@ -70,20 +71,20 @@ pub const App = struct {
             .address = addr,
         };
         defer client.deinit();
-        try client.init(self.args.base, try self.gocStore(), "testclient");
+        try client.init(self.config.base, try self.gocStore(), "testclient");
 
-        client.setRunCommand(self.args.extra.items);
+        client.setRunCommand(self.config.extra.items);
 
         var client_thread = try std.Thread.spawn(
             .{},
             comm.Session.runClient,
             .{
                 &client.session,
-                self.args.reset_folder,
-                self.args.cleanup_folder,
-                self.args.reset_store,
-                self.args.collect,
-                self.args.defines.items,
+                self.config.reset_folder,
+                self.config.cleanup_folder,
+                self.config.reset_store,
+                self.config.collect,
+                self.config.defines.items,
             },
         );
         defer client_thread.join();
@@ -94,7 +95,7 @@ pub const App = struct {
             .env = self.env,
             .address = try self.address(),
             .store = try self.gocStore(),
-            .folder = self.args.base,
+            .folder = self.config.base,
             .name = "server",
         };
         defer server.deinit();
@@ -116,21 +117,21 @@ pub const App = struct {
             .address = try self.address(),
         };
         defer client.deinit();
-        try client.init(self.args.base, try self.gocStore(), "client");
+        try client.init(self.config.base, try self.gocStore(), "client");
 
-        client.setRunCommand(self.args.extra.items);
+        client.setRunCommand(self.config.extra.items);
 
         try client.session.runClient(
-            self.args.reset_folder,
-            self.args.cleanup_folder,
-            self.args.reset_store,
-            self.args.collect,
-            self.args.defines.items,
+            self.config.reset_folder,
+            self.config.cleanup_folder,
+            self.config.reset_store,
+            self.config.collect,
+            self.config.defines.items,
         );
     }
 
     fn runCheck(self: *Self) !void {
-        var tree = try fs.collectTree(self.env, self.args.base);
+        var tree = try fs.collectTree(self.env, self.config.base);
         defer tree.deinit();
 
         const file = try std.Io.Dir.cwd().createFile(self.env.io, "filestates.csv", .{});
@@ -149,16 +150,16 @@ pub const App = struct {
     }
 
     fn address(self: Self) !std.Io.net.IpAddress {
-        std.debug.print("ip: {s}\n", .{self.args.ip});
-        return try std.Io.net.IpAddress.resolve(self.env.io, self.args.ip, self.args.port);
+        std.debug.print("ip: {s}\n", .{self.config.ip});
+        return try std.Io.net.IpAddress.resolve(self.env.io, self.config.ip, self.config.port);
     }
 
     fn gocStore(self: *Self) !*blob.Store {
         if (self.store == null) {
             if (self.env.log.level(1)) |w|
-                try w.print("Creating blob store in '{s}'\n", .{self.args.store_path});
+                try w.print("Creating blob store in '{s}'\n", .{self.config.store_path});
             self.store = blob.Store.init(self.env);
-            try self.store.?.open(self.args.store_path);
+            try self.store.?.open(self.config.store_path);
         }
         return &self.store.?;
     }

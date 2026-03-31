@@ -1,9 +1,12 @@
 const std = @import("std");
 const app = @import("app.zig");
-const cli = @import("cli.zig");
 const cfg = @import("cfg.zig");
 const rubr = @import("rubr.zig");
 const Env = rubr.Env;
+
+pub const Error = error{
+    ConfigLoadFailed,
+};
 
 pub fn main(init: std.process.Init) !void {
     var env_inst = Env.Instance{ .environ = init.minimal.environ };
@@ -15,27 +18,23 @@ pub fn main(init: std.process.Init) !void {
     const s = rubr.profile.Scope.init(env.io, .A, env.stdout);
     defer s.deinit();
 
-    var cfg_loader = cfg.Loader{ .env = env };
+    var cfg_loader: cfg.Loader = .{};
+    try cfg_loader.init(env);
     defer cfg_loader.deinit();
-    try cfg_loader.load();
+    try cfg_loader.load(init.minimal.args);
 
-    var cli_args = cli.Args{ .env = env };
-    cli_args.init();
-    try cli_args.parse(init.minimal.args);
-    env_inst.log.setLevel(cli_args.verbose);
-    if (cfg_loader.config) |config|
-        if (cli_args.update(config.aliases))
-            if (env.log.level(1)) |w|
-                try w.print("Found alias for '{s}'\n", .{cli_args.ip});
+    const config = &cfg_loader.config;
 
-    if (cli_args.print_help) {
-        try cli_args.printHelp();
+    env_inst.log.setLevel(config.verbose);
+
+    if (config.print_help) {
+        try cfg_loader.printHelp(env.stdout);
         return;
     }
 
     var my_app = app.App.init(
         env,
-        cli_args,
+        config,
     );
     defer my_app.deinit();
 
