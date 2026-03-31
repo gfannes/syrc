@@ -1,4 +1,6 @@
 const std = @import("std");
+const builtin = @import("builtin");
+
 const prot = @import("../prot.zig");
 const fs = @import("../fs.zig");
 const blob = @import("../blob.zig");
@@ -53,16 +55,19 @@ pub fn init(self: *Self, stream: std.Io.net.Stream) !void {
     self.cio = Io{ .env = self.env };
     self.cio.init(stream);
 
-    const sigaction = std.posix.Sigaction{
-        .handler = .{ .handler = onSigInt },
-        .mask = std.posix.sigemptyset(),
-        .flags = 0,
-    };
-    std.posix.sigaction(std.posix.SIG.INT, &sigaction, null);
+    if (builtin.os.tag != .windows) {
+        const sigaction = std.posix.Sigaction{
+            .handler = .{ .handler = onSigInt },
+            .mask = std.posix.sigemptyset(),
+            .flags = 0,
+        };
+        std.posix.sigaction(std.posix.SIG.INT, &sigaction, null);
+    }
 }
 
 pub fn deinit(self: *Self) void {
-    std.posix.sigaction(std.posix.SIG.INT, null, null);
+    if (builtin.os.tag != .windows)
+        std.posix.sigaction(std.posix.SIG.INT, null, null);
 
     if (self.stream) |*stream|
         stream.close(self.env.io);

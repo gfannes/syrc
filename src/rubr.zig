@@ -929,7 +929,9 @@ pub const cli = struct {
 
             self.argv = try a.alloc([]const u8, os_args.vector.len);
 
-            var it = os_args.iterate();
+            // We use iterateAllocator() to support Windows as well.
+            var it = try os_args.iterateAllocator(a);
+            defer it.deinit();
             var ix: usize = 0;
             while (it.next()) |os_arg| {
                 self.argv[ix] = try a.dupe(u8, os_arg);
