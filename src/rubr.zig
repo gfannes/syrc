@@ -966,6 +966,11 @@ pub const cli = struct {
     
             return Arg{ .arg = arg };
         }
+    
+        pub fn unpop(self: *Self) void {
+            self.argv.ptr -= 1;
+            self.argv.len += 1;
+        }
     };
     
     pub const Arg = struct {
