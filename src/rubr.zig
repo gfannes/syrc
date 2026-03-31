@@ -943,6 +943,9 @@ pub const cli = struct {
                 self.argv[ix] = try a.dupe(u8, os_arg);
                 ix += 1;
             }
+    
+            // This is necessary for Windows: os_args.vector.len is too long.
+            self.argv.len = ix;
         }
         pub fn setupFromData(self: *Self, argv: []const []const u8) !void {
             const a = self.env.aa;
