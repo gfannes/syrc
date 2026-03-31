@@ -1,4 +1,5 @@
 const std = @import("std");
+const builtin = @import("builtin");
 
 const dto = @import("dto.zig");
 const rubr = @import("rubr.zig");
@@ -299,9 +300,11 @@ pub const Loader = struct {
             self.config.j = std.Thread.getCpuCount() catch 0;
 
         if (self.config.name.len == 0) {
-            var buffer: [std.posix.HOST_NAME_MAX]u8 = undefined;
-            const hostname = try std.posix.gethostname(&buffer);
-            self.config.name = try self.aa.dupe(u8, hostname);
+            if (builtin.os.tag != .windows) {
+                var buffer: [std.posix.HOST_NAME_MAX]u8 = undefined;
+                const hostname = try std.posix.gethostname(&buffer);
+                self.config.name = try self.aa.dupe(u8, hostname);
+            }
         }
 
         if (!std.fs.path.isAbsolute(self.config.base)) {
