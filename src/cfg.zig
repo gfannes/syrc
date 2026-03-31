@@ -236,12 +236,12 @@ pub const Loader = struct {
         const cli_args: *CliArgs = &self.cli_args;
 
         // Free args before '--' are interpreted
-        for (cli_args.extra_before_dashdash.items) |extra| {
+        outer: for (cli_args.extra_before_dashdash.items) |extra| {
             if (cli_args.ip == null) {
                 for (config.aliases) |alias| {
                     if (std.mem.eql(u8, extra, alias.name)) {
                         cli_args.ip = alias.ip;
-                        continue;
+                        continue :outer;
                     }
                 }
             }
@@ -251,7 +251,7 @@ pub const Loader = struct {
                 } else {
                     try config.defines.append(self.aa, .{ .key = extra[0..ix], .value = extra[ix + 1 ..] });
                 }
-                continue;
+                continue :outer;
             }
 
             try config.extra.append(self.aa, extra);
