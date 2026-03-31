@@ -13,7 +13,7 @@ pub fn main(init: std.process.Init) !void {
     env_inst.init();
     defer env_inst.deinit();
 
-    var env = env_inst.env();
+    const env = env_inst.env();
 
     const s = rubr.profile.Scope.init(env.io, .A, env.stdout);
     defer s.deinit();
