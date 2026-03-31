@@ -6,37 +6,37 @@ const builtin = @import("builtin");
 // Export from 'src/walker.zig'
 pub const walker = struct {
     // &todo Take `.gitignore` and `.ignore` into account
-
+    
     pub const Offsets = struct {
         base: usize = 0,
         name: usize = 0,
     };
-
+    
     pub const Kind = enum {
         Enter,
         Leave,
         File,
     };
-
+    
     pub const Walker = struct {
         const Ignore = struct { buffer: Buffer = undefined, ignore: ignore.Ignore = undefined, path_len: usize = 0 };
         const IgnoreStack = std.ArrayList(Ignore);
         const Buffer = std.ArrayList(u8);
-
+    
         env: Env,
-
+    
         filter: Filter = .{},
-
+    
         // We keep track of the current path as a []const u8. If the caller has to do this,
         // he has to use Dir.realPath() which is less efficient.
         buffer: [std.fs.max_path_bytes]u8 = undefined,
         path: []const u8 = &.{},
         base: usize = undefined,
-
+    
         ignore_offset: usize = 0,
-
+    
         ignore_stack: IgnoreStack = .empty,
-
+    
         pub fn deinit(self: *Walker) void {
             for (self.ignore_stack.items) |*item| {
                 item.ignore.deinit();
@@ -44,7 +44,7 @@ pub const walker = struct {
             }
             self.ignore_stack.deinit(self.env.a);
         }
-
+    
         // cb() is passed:
         // - dir: std.Io.Dir
         // - path: full path of file/folder
@@ -54,51 +54,51 @@ pub const walker = struct {
             const len = try basedir.realPathFile(self.env.io, ".", &self.buffer);
             self.path = self.buffer[0..len];
             self.base = self.path.len + 1;
-
+    
             var dir = try basedir.openDir(self.env.io, ".", .{ .iterate = true });
             defer dir.close(self.env.io);
-
+    
             const path = self.path;
-
+    
             try cb.call(dir, path, null, Kind.Enter);
             try self._walk(dir, cb);
             try cb.call(dir, path, null, Kind.Leave);
         }
-
+    
         fn _walk(self: *Walker, dir: std.Io.Dir, cb: anytype) !void {
             var added_ignore = false;
-
+    
             if (dir.openFile(self.env.io, ".gitignore", .{})) |file| {
                 defer file.close(self.env.io);
-
+    
                 const stat = try file.stat(self.env.io);
-
+    
                 var ig = Ignore{ .buffer = try Buffer.initCapacity(self.env.a, stat.size) };
                 try ig.buffer.resize(self.env.a, stat.size);
                 var buf: [1024]u8 = undefined;
                 var reader = file.reader(self.env.io, &buf);
                 try reader.interface.readSliceAll(ig.buffer.items);
-
+    
                 ig.ignore = try ignore.Ignore.initFromContent(ig.buffer.items, self.env.a);
                 ig.path_len = self.path.len;
                 try self.ignore_stack.append(self.env.a, ig);
-
+    
                 self.ignore_offset = ig.path_len + 1;
-
+    
                 added_ignore = true;
             } else |_| {}
-
+    
             var it = dir.iterate();
             while (try it.next(self.env.io)) |el| {
                 if (!self.filter.call(dir, el))
                     continue;
-
+    
                 const orig_path_len = self.path.len;
                 defer self.path.len = orig_path_len;
-
+    
                 const offsets = Offsets{ .base = self.base, .name = self.path.len + 1 };
                 self._append_to_path(el.name);
-
+    
                 switch (el.kind) {
                     std.Io.File.Kind.file => {
                         if (slc.last(self.ignore_stack.items)) |e| {
@@ -106,7 +106,7 @@ pub const walker = struct {
                             if (e.ignore.match(ignore_path))
                                 continue;
                         }
-
+    
                         try cb.call(dir, self.path, offsets, Kind.File);
                     },
                     std.Io.File.Kind.directory => {
@@ -115,66 +115,67 @@ pub const walker = struct {
                             if (e.ignore.match(ignore_path))
                                 continue;
                         }
-
+    
                         var subdir = try dir.openDir(self.env.io, el.name, .{ .iterate = true });
                         defer subdir.close(self.env.io);
-
+    
                         const path = self.path;
-
+    
                         try cb.call(subdir, path, offsets, Kind.Enter);
-
+    
                         try self._walk(subdir, cb);
-
+    
                         try cb.call(subdir, path, offsets, Kind.Leave);
                     },
                     else => {},
                 }
             }
-
+    
             if (added_ignore) {
                 if (self.ignore_stack.pop()) |v| {
                     var v_mut = v;
                     v_mut.buffer.deinit(self.env.a);
                     v_mut.ignore.deinit();
                 }
-
+    
                 self.ignore_offset = if (slc.last(self.ignore_stack.items)) |x| x.path_len + 1 else 0;
             }
         }
-
+    
         fn _append_to_path(self: *Walker, name: []const u8) void {
             self.buffer[self.path.len] = '/';
             self.path.len += 1;
-
+    
             std.mem.copyForwards(u8, self.buffer[self.path.len..], name);
             self.path.len += name.len;
         }
     };
-
+    
     pub const Filter = struct {
         // Skip hidden files by default
         hidden: bool = true,
-
+    
         // Skip files with following extensions. Include '.' in extension.
         extensions: []const []const u8 = &.{},
-
+    
         fn call(self: Filter, _: std.Io.Dir, entry: std.Io.Dir.Entry) bool {
             if (self.hidden and is_hidden(entry.name))
                 return false;
-
+    
             const my_ext = std.fs.path.extension(entry.name);
             for (self.extensions) |ext| {
                 if (std.mem.eql(u8, my_ext, ext))
                     return false;
             }
-
+    
             return true;
         }
     };
-
+    
     fn is_hidden(name: []const u8) bool {
         return name.len > 0 and name[0] == '.';
     }
+    
 
     // Export from 'src/walker/ignore.zig'
     pub const ignore = struct {
@@ -182,15 +183,15 @@ pub const walker = struct {
             const Self = @This();
             const Globs = std.ArrayList(glb.Glob);
             const Strings = std.ArrayList([]const u8);
-
+        
             a: std.mem.Allocator,
             globs: Globs = .empty,
             antiglobs: Globs = .empty,
-
+        
             pub fn init(a: std.mem.Allocator) Ignore {
                 return Ignore{ .a = a };
             }
-
+        
             pub fn deinit(self: *Self) void {
                 for ([_]*Globs{ &self.globs, &self.antiglobs }) |globs| {
                     for (globs.items) |*item|
@@ -198,43 +199,43 @@ pub const walker = struct {
                     globs.deinit(self.a);
                 }
             }
-
+        
             pub fn initFromFile(dir: std.Io.Dir, name: []const u8, a: std.mem.Allocator) !Self {
                 const file = try dir.openFile(name, .{});
                 defer file.close();
-
+        
                 const stat = try file.stat();
-
+        
                 const r = file.reader();
-
+        
                 const content = try r.readAllAlloc(a, stat.size);
                 defer a.free(content);
-
+        
                 return initFromContent(content, a);
             }
-
+        
             pub fn initFromContent(content: []const u8, a: std.mem.Allocator) !Self {
                 var self = Self.init(a);
                 errdefer self.deinit();
-
+        
                 var strange_content = strng.Strange{ .content = content };
                 while (strange_content.popLine()) |line| {
                     var strange_line = strng.Strange{ .content = line };
-
+        
                     // Trim
                     _ = strange_line.popMany(' ');
                     _ = strange_line.popManyBack(' ');
-
+        
                     if (strange_line.popMany('#') > 0)
                         // Skip comments
                         continue;
-
+        
                     if (strange_line.empty())
                         continue;
-
+        
                     const is_anti = strange_line.popMany('!') > 0;
                     const globs = if (is_anti) &self.antiglobs else &self.globs;
-
+        
                     // '*.txt'    ignores '**/*.txt'
                     // 'dir/'     ignores '**/dir/**'
                     // '/dir/'    ignores 'dir/**'
@@ -245,22 +246,22 @@ pub const walker = struct {
                     config.pattern = strange_line.str();
                     if (strange_line.back() == '/')
                         config.back = "**";
-
+        
                     try globs.append(a, try glb.Glob.init(config, a));
                 }
-
+        
                 return self;
             }
-
+        
             pub fn addExt(self: *Ignore, ext: []const u8) !void {
                 const buffer: [128]u8 = undefined;
                 const fba = std.heap.FixedBufferAllocator.init(buffer);
                 const my_ext = try std.mem.concat(fba, u8, &[_][]const u8{ ".", ext });
-
+        
                 const glob_config = glb.Config{ .pattern = my_ext, .front = "**" };
                 try self.globs.append(self.a, try glb.Glob.init(glob_config, self.globs.allocator));
             }
-
+        
             pub fn match(self: Self, fp: []const u8) bool {
                 var ret = false;
                 for (self.globs.items) |item| {
@@ -274,6 +275,7 @@ pub const walker = struct {
                 return ret;
             }
         };
+        
     };
 };
 
@@ -282,7 +284,7 @@ pub const slc = struct {
     pub fn isEmpty(slice: anytype) bool {
         return slice.len == 0;
     }
-
+    
     pub fn first(slice: anytype) ?@TypeOf(slice[0]) {
         return if (slice.len > 0) slice[0] else null;
     }
@@ -292,7 +294,7 @@ pub const slc = struct {
     pub fn firstPtrUnsafe(slice: anytype) @TypeOf(&slice[0]) {
         return &slice[0];
     }
-
+    
     pub fn last(slice: anytype) ?@TypeOf(slice[0]) {
         return if (slice.len > 0) slice[slice.len - 1] else null;
     }
@@ -302,25 +304,26 @@ pub const slc = struct {
     pub fn lastPtrUnsafe(slice: anytype) @TypeOf(&slice[0]) {
         return &slice[slice.len - 1];
     }
+    
 };
 
 // Export from 'src/Env.zig'
 pub const Env = struct {
     const Env_ = @This();
-
+    
     // General purpose allocator
     a: std.mem.Allocator = undefined,
     // Arena allocator
     aa: std.mem.Allocator = undefined,
-
+    
     io: std.Io = undefined,
     envmap: *const std.process.Environ.Map = undefined,
-
+    
     log: *const Log = undefined,
-
+    
     stdout: *std.Io.Writer = undefined,
     stderr: *std.Io.Writer = undefined,
-
+    
     pub const Instance = struct {
         const Self = @This();
         const DA = std.heap.DebugAllocator(.{});
@@ -339,7 +342,7 @@ pub const Env = struct {
                 self.stderr_writer.interface.flush() catch {};
             }
         };
-
+    
         environ: std.process.Environ = std.process.Environ.empty,
         envmap: std.process.Environ.Map = undefined,
         log: Log = undefined,
@@ -349,7 +352,7 @@ pub const Env = struct {
         io: std.Io = undefined,
         start_ts: std.Io.Timestamp = undefined,
         stdio: StdIO = undefined,
-
+    
         pub fn init(self: *Self) void {
             self.gpa = DA{};
             const a = self.gpa.allocator();
@@ -372,7 +375,7 @@ pub const Env = struct {
                 self.log.err("Found memory leaks in Env\n", .{}) catch {};
             }
         }
-
+    
         pub fn env(self: *Self) Env_ {
             return .{
                 .a = self.gpa.allocator(),
@@ -384,13 +387,13 @@ pub const Env = struct {
                 .stderr = &self.stdio.stderr_writer.interface,
             };
         }
-
+    
         pub fn duration_ns(self: Self) i96 {
             const duration = self.start_ts.durationTo(std.Io.Clock.now(.real, self.io));
             return duration.nanoseconds;
         }
     };
-
+    
     pub fn for_ut() Env_ {
         const ut = std.testing;
         return .{
@@ -399,11 +402,12 @@ pub const Env = struct {
             .io = ut.io,
         };
     }
-
+    
     pub fn duration_ns(env: Env_) i96 {
         const inst: *const Instance = @alignCast(@fieldParentPtr("log", env.log));
         return inst.duration_ns();
     }
+    
 };
 
 // Export from 'src/strng.zig'
@@ -413,23 +417,23 @@ pub const strng = struct {
     // &todo Support creating file/folder tree for UTs (mod+cli)
     // &todo Create spec
     // - Support for post-body attributes?
-
+    
     pub const Strange = struct {
         const Self = @This();
-
+    
         content: []const u8,
-
+    
         pub fn empty(self: Self) bool {
             return self.content.len == 0;
         }
         pub fn size(self: Self) usize {
             return self.content.len;
         }
-
+    
         pub fn str(self: Self) []const u8 {
             return self.content;
         }
-
+    
         pub fn front(self: Self) ?u8 {
             if (self.content.len == 0)
                 return null;
@@ -440,14 +444,14 @@ pub const strng = struct {
                 return null;
             return self.content[self.content.len - 1];
         }
-
+    
         pub fn popAll(self: *Self) ?[]const u8 {
             if (self.empty())
                 return null;
             defer self.content = &.{};
             return self.content;
         }
-
+    
         pub fn popMany(self: *Self, ch: u8) usize {
             for (self.content, 0..) |act, ix| {
                 if (act != ch) {
@@ -466,7 +470,7 @@ pub const strng = struct {
             }
             return count;
         }
-
+    
         pub fn popTo(self: *Self, ch: u8) ?[]const u8 {
             if (std.mem.indexOfScalar(u8, self.content, ch)) |ix| {
                 defer self._popFront(ix + 1);
@@ -475,7 +479,7 @@ pub const strng = struct {
                 return null;
             }
         }
-
+    
         pub fn popChar(self: *Self, ch: u8) bool {
             if (self.content.len > 0 and self.content[0] == ch) {
                 self._popFront(1);
@@ -490,7 +494,7 @@ pub const strng = struct {
             }
             return false;
         }
-
+    
         pub fn popOne(self: *Self) ?u8 {
             if (self.content.len > 0) {
                 defer self._popFront(1);
@@ -498,7 +502,7 @@ pub const strng = struct {
             }
             return null;
         }
-
+    
         pub fn popStr(self: *Self, s: []const u8) bool {
             if (std.mem.startsWith(u8, self.content, s)) {
                 self._popFront(s.len);
@@ -506,11 +510,11 @@ pub const strng = struct {
             }
             return false;
         }
-
+    
         pub fn popLine(self: *Self) ?[]const u8 {
             if (self.empty())
                 return null;
-
+    
             var line = self.content;
             if (std.mem.indexOfScalar(u8, self.content, '\n')) |ix| {
                 line.len = if (ix > 0 and self.content[ix - 1] == '\r') ix - 1 else ix;
@@ -518,10 +522,10 @@ pub const strng = struct {
             } else {
                 self.content = &.{};
             }
-
+    
             return line;
         }
-
+    
         pub fn popInt(self: *Self, T: type) ?T {
             // Find number of chars comprising number
             var slice = self.content;
@@ -540,7 +544,7 @@ pub const strng = struct {
             }
             return null;
         }
-
+    
         pub fn popIntMaxCount(self: *Self, T: type, max_count: usize) ?T {
             // Find number of chars comprising number
             const count = @min(max_count, self.content.len);
@@ -564,14 +568,14 @@ pub const strng = struct {
             }
             return null;
         }
-
+    
         pub fn popFront(self: *Self, count: usize) ?[]const u8 {
             if (self.content.len < count)
                 return null;
             defer self._popFront(count);
             return self.content[0..count];
         }
-
+    
         fn _popFront(self: *Self, count: usize) void {
             self.content.ptr += count;
             self.content.len -= count;
@@ -580,22 +584,23 @@ pub const strng = struct {
             self.content.len -= count;
         }
     };
+    
 };
 
 // Export from 'src/glb.zig'
 pub const glb = struct {
     // &todo Support '?' pattern
-
+    
     const Error = error{
         EmptyPattern,
         IllegalWildcard,
     };
-
+    
     const Wildcard = enum {
         None,
         Some, // '*': All characters except path separator '/'
         All, // '**': All characters
-
+    
         pub fn fromStr(str: []const u8) !Wildcard {
             if (str.len == 0)
                 return Wildcard.None;
@@ -605,7 +610,7 @@ pub const glb = struct {
                 return Wildcard.All;
             return Error.IllegalWildcard;
         }
-
+    
         pub fn max(a: Wildcard, b: Wildcard) Wildcard {
             return switch (a) {
                 Wildcard.None => b,
@@ -614,61 +619,61 @@ pub const glb = struct {
             };
         }
     };
-
+    
     // A Part is easy to match: search for str and check if whatever in-between matches with wildcard
     const Part = struct {
         wildcard: Wildcard,
         str: []const u8,
     };
-
+    
     pub const Config = struct {
         pattern: []const u8 = &.{},
         front: []const u8 = &.{},
         back: []const u8 = &.{},
     };
-
+    
     pub const Glob = struct {
         const Self = @This();
         const Parts = std.ArrayList(Part);
-
+    
         a: std.mem.Allocator,
         parts: Parts = .empty,
         config: ?*Config = null,
-
+    
         pub fn init(config: Config, ma: std.mem.Allocator) !Glob {
             // Create our own copy of config to unsure it outlives self
             const my_config = try ma.create(Config);
             my_config.pattern = try ma.dupe(u8, config.pattern);
             my_config.front = try ma.dupe(u8, config.front);
             my_config.back = try ma.dupe(u8, config.back);
-
+    
             var ret = try initUnmanaged(my_config.*, ma);
             ret.config = my_config;
-
+    
             return ret;
         }
-
+    
         // Assumes config outlives self
         pub fn initUnmanaged(config: Config, a: std.mem.Allocator) !Glob {
             if (config.pattern.len == 0)
                 return Error.EmptyPattern;
-
+    
             var glob = Glob{ .a = a };
-
+    
             var strange = strng.Strange{ .content = config.pattern };
-
+    
             var wildcard = try Wildcard.fromStr(config.front);
-
+    
             while (true) {
                 if (strange.popTo('*')) |str| {
                     if (str.len > 0) {
                         try glob.parts.append(a, Part{ .wildcard = wildcard, .str = str });
                     }
-
+    
                     // We found a single '*', check for more '*' to decide if we can match path separators as well
                     {
                         const new_wildcard = if (strange.popMany('*') > 0) Wildcard.All else Wildcard.Some;
-
+    
                         if (str.len == 0) {
                             // When pattern starts with a '*', keep the config.front wildcard if it is stronger
                             wildcard = Wildcard.max(wildcard, new_wildcard);
@@ -676,7 +681,7 @@ pub const glb = struct {
                             wildcard = new_wildcard;
                         }
                     }
-
+    
                     if (strange.empty()) {
                         // We popped everything from strange and will hence not enter below's branch: setup wildcard according to config.back
                         const new_wildcard = try Wildcard.fromStr(config.back);
@@ -684,17 +689,17 @@ pub const glb = struct {
                     }
                 } else if (strange.popAll()) |str| {
                     try glob.parts.append(a, Part{ .wildcard = wildcard, .str = str });
-
+    
                     wildcard = try Wildcard.fromStr(config.back);
                 } else {
                     try glob.parts.append(a, Part{ .wildcard = wildcard, .str = "" });
                     break;
                 }
             }
-
+    
             return glob;
         }
-
+    
         pub fn deinit(self: *Self) void {
             self.parts.deinit(self.a);
             if (self.config) |el| {
@@ -704,37 +709,37 @@ pub const glb = struct {
                 self.a.destroy(el);
             }
         }
-
+    
         pub fn match(self: Self, haystack: []const u8) bool {
             return _match(self.parts.items, haystack);
         }
-
+    
         fn _match(parts: []const Part, haystack: []const u8) bool {
             if (parts.len == 0)
                 return true;
-
+    
             const part = &parts[0];
-
+    
             switch (part.wildcard) {
                 Wildcard.None => {
                     if (part.str.len == 0) {
                         // This is a special case with an empty part.str: this should only for the last part
                         std.debug.assert(parts.len == 1);
-
+    
                         // None only matches if we are at the end
                         return haystack.len == 0;
                     }
-
+    
                     if (!std.mem.startsWith(u8, haystack, part.str))
                         return false;
-
+    
                     return _match(parts[1..], haystack[part.str.len..]);
                 },
                 Wildcard.Some => {
                     if (part.str.len == 0) {
                         // This is a special case with an empty part.str: this should only for the last part
                         std.debug.assert(parts.len == 1);
-
+    
                         // Accept a full match if there is no path separator
                         return std.mem.indexOfScalar(u8, haystack, '/') == null;
                     } else {
@@ -759,7 +764,7 @@ pub const glb = struct {
                     if (part.str.len == 0) {
                         // This is a special case with an empty part.str: this should only be used for the last part
                         std.debug.assert(parts.len == 1);
-
+    
                         // Accept a full match until the end if this is the last part.
                         // If this is not the last part, something unexpected happened: Glob.init() should not produce something like that
                         return parts.len == 1;
@@ -781,34 +786,35 @@ pub const glb = struct {
             }
         }
     };
+    
 };
 
 // Export from 'src/Log.zig'
 pub const Log = struct {
     pub const Error = error{FilePathTooLong};
-
+    
     // &improv: Support both buffered and non-buffered logging
     const Self = @This();
-
+    
     const Autoclean = struct {
         buffer: [std.fs.max_path_bytes]u8 = undefined,
         filepath: []const u8 = &.{},
     };
-
+    
     io: std.Io,
-
+    
     _do_close: bool = false,
     _file: std.Io.File = undefined,
-
+    
     _buffer: [1024]u8 = undefined,
     _writer: std.Io.File.Writer = undefined,
-
+    
     _io: *std.Io.Writer = undefined,
-
+    
     _lvl: usize = 0,
-
+    
     _autoclean: ?Autoclean = null,
-
+    
     pub fn init(self: *Self) void {
         self._file = std.Io.File.stdout();
         self.initWriter();
@@ -819,20 +825,20 @@ pub const Log = struct {
             std.Io.Dir.deleteFileAbsolute(self.io, autoclean.filepath) catch {};
         }
     }
-
+    
     // Any '%' in 'filepath' will be replaced with the process id
     const Options = struct {
         autoclean: bool = false,
     };
     pub fn toFile(self: *Self, filepath: []const u8, options: Options) !void {
         try self.closeWriter();
-
+    
         var pct_count: usize = 0;
         for (filepath) |ch| {
             if (ch == '%')
                 pct_count += 1;
         }
-
+    
         var buf: [std.fs.max_path_bytes]u8 = undefined;
         const filepath_clean = if (pct_count > 0) blk: {
             var pid_buf: [32]u8 = undefined;
@@ -855,7 +861,7 @@ pub const Log = struct {
         } else blk: {
             break :blk filepath;
         };
-
+    
         if (std.fs.path.isAbsolute(filepath_clean)) {
             self._file = try std.Io.Dir.createFileAbsolute(self.io, filepath_clean, .{});
             if (options.autoclean) {
@@ -870,18 +876,18 @@ pub const Log = struct {
             self._file = try std.Io.Dir.cwd().createFile(self.io, filepath_clean, .{});
         }
         self._do_close = true;
-
+    
         self.initWriter();
     }
-
+    
     pub fn setLevel(self: *Self, lvl: usize) void {
         self._lvl = lvl;
     }
-
+    
     pub fn writer(self: Self) *std.Io.Writer {
         return self._io;
     }
-
+    
     pub fn print(self: Self, comptime fmtstr: []const u8, args: anytype) !void {
         try self._io.print(fmtstr, args);
         try self._io.flush();
@@ -895,13 +901,13 @@ pub const Log = struct {
     pub fn err(self: Self, comptime fmtstr: []const u8, args: anytype) !void {
         try self.print("Error: " ++ fmtstr, args);
     }
-
+    
     pub fn level(self: Self, lvl: usize) ?*std.Io.Writer {
         if (self._lvl >= lvl)
             return self._io;
         return null;
     }
-
+    
     fn initWriter(self: *Self) void {
         self._writer = self._file.writer(self.io, &self._buffer);
         self._io = &self._writer.interface;
@@ -913,6 +919,7 @@ pub const Log = struct {
             self._do_close = false;
         }
     }
+    
 };
 
 // Export from 'src/cli.zig'
@@ -920,17 +927,16 @@ pub const cli = struct {
     // Allocates everything on env.aa: no need for deinit() or lifetime management
     pub const Args = struct {
         const Self = @This();
-
+    
         env: Env,
         argv: [][]const u8 = &.{},
-
+    
         pub fn setupFromOS(self: *Self, os_args: std.process.Args) !void {
             const a = self.env.aa;
-
+    
             self.argv = try a.alloc([]const u8, os_args.vector.len);
-
-            // We use iterateAllocator() to support Windows as well.
-            var it = try os_args.iterateAllocator(a);
+    
+            var it = try os_args.iterateAllocator(self.env.a);
             defer it.deinit();
             var ix: usize = 0;
             while (it.next()) |os_arg| {
@@ -940,38 +946,39 @@ pub const cli = struct {
         }
         pub fn setupFromData(self: *Self, argv: []const []const u8) !void {
             const a = self.env.aa;
-
+    
             self.argv = try a.alloc([]const u8, argv.len);
             for (argv, 0..) |slice, ix| {
                 self.argv[ix] = try a.dupe(u8, slice);
             }
         }
-
+    
         pub fn pop(self: *Self) ?Arg {
             if (self.argv.len == 0) return null;
-
+    
             const a = self.env.aa;
-            const arg = a.dupe(u8, std.mem.sliceTo(self.argv[0], 0)) catch return null;
+            const arg = a.dupe(u8, self.argv[0]) catch return null;
             self.argv.ptr += 1;
             self.argv.len -= 1;
-
+    
             return Arg{ .arg = arg };
         }
     };
-
+    
     pub const Arg = struct {
         const Self = @This();
-
+    
         arg: []const u8,
-
+    
         pub fn is(self: Arg, sh: []const u8, lh: []const u8) bool {
             return std.mem.eql(u8, self.arg, sh) or std.mem.eql(u8, self.arg, lh);
         }
-
+    
         pub fn as(self: Self, T: type) !T {
             return try std.fmt.parseInt(T, self.arg, 10);
         }
     };
+    
 };
 
 // Export from 'src/profile.zig'
@@ -981,25 +988,25 @@ pub const profile = struct {
         B,
         C,
     };
-
+    
     const Timestamp = i128;
-
+    
     const Measurement = struct {
         max: Timestamp = 0,
     };
-
+    
     const count = @typeInfo(Id).@"enum".fields.len;
     var measurements = [_]Measurement{Measurement{}} ** count;
-
+    
     pub const Scope = struct {
         const Self = @This();
-
+    
         io: std.Io,
-
+    
         id: Id,
         start_ts: std.Io.Timestamp,
         w: *std.Io.Writer,
-
+    
         pub fn init(io: std.Io, id: Id, w: *std.Io.Writer) Scope {
             return Scope{ .io = io, .id = id, .start_ts = std.Io.Clock.now(.real, io), .w = w };
         }
@@ -1011,11 +1018,12 @@ pub const profile = struct {
             self.w.print("elapse: {}.{:0>9.9}s\n", .{ a, @as(u64, @intCast(b)) }) catch {};
             self.w.flush() catch {};
         }
-
+    
         fn now(self: Self) std.Io.Timestamp {
             return std.Io.Clock.now(.real, self.io);
         }
     };
+    
 };
 
 // Export from 'src/naft.zig'
@@ -1023,18 +1031,18 @@ pub const naft = struct {
     const Error = error{
         CouldNotCreateStdOut,
     };
-
+    
     pub const Node = struct {
         const Self = @This();
-
+    
         w: ?*std.Io.Writer,
-
+    
         level: usize = 0,
         // Indicates if this Node already contains nested elements (Text, Node). This is used to add a closing '}' upon deinit().
         has_block: bool = false,
         // Indicates if this Node already contains a Node. This is used for deciding newlines etc.
         has_node: bool = false,
-
+    
         pub fn root(w: ?*std.Io.Writer) Node {
             return .{ .w = w, .has_block = true };
         }
@@ -1042,7 +1050,7 @@ pub const naft = struct {
             if (self.level == 0)
                 // The top-level block does not need any handling
                 return;
-
+    
             if (self.has_block) {
                 if (self.has_node)
                     self.indent();
@@ -1051,7 +1059,7 @@ pub const naft = struct {
                 self.print("\n", .{});
             }
         }
-
+    
         pub fn node(self: *Self, name: []const u8) Node {
             self.ensure_block(true);
             const n = Node{ .w = self.w, .level = self.level + 1 };
@@ -1066,22 +1074,22 @@ pub const naft = struct {
             n.print("[{s}:{s}]", .{ name, name2 });
             return n;
         }
-
+    
         pub fn attr(self: *Self, key: []const u8, value: anytype) void {
             const T = @TypeOf(value);
-
+    
             if (self.has_block) {
                 std.debug.print("Attributes are not allowed anymore: block was already started\n", .{});
                 return;
             }
-
+    
             const str = switch (@typeInfo(T)) {
                 // We assume that any .pointer can be printed as a string
                 .pointer => "s",
                 .@"struct" => if (@hasDecl(T, "format")) "f" else "any",
                 else => "any",
             };
-
+    
             self.print("({s}:{" ++ str ++ "})", .{ key, value });
         }
         pub fn attr1(self: *Self, value: anytype) void {
@@ -1089,21 +1097,21 @@ pub const naft = struct {
                 std.debug.print("Attributes are not allowed anymore: block was already started\n", .{});
                 return;
             }
-
+    
             const str = switch (@typeInfo(@TypeOf(value))) {
                 // We assume that any .pointer can be printed as a string
                 .pointer => "s",
                 else => "any",
             };
-
+    
             self.print("({" ++ str ++ "})", .{value});
         }
-
+    
         pub fn text(self: *Self, str: []const u8) void {
             self.ensure_block(false);
             self.print("{s}", .{str});
         }
-
+    
         fn ensure_block(self: *Self, is_node: bool) void {
             if (!self.has_block)
                 self.print("{{", .{});
@@ -1114,13 +1122,13 @@ pub const naft = struct {
                 self.has_node = is_node;
             }
         }
-
+    
         fn indent(self: Self) void {
             if (self.level > 1)
                 for (0..self.level - 1) |_|
                     self.print("  ", .{});
         }
-
+    
         fn print(self: Self, comptime fmtstr: []const u8, args: anytype) void {
             if (self.w) |io| {
                 io.print(fmtstr, args) catch {};
@@ -1130,6 +1138,7 @@ pub const naft = struct {
             }
         }
     };
+    
 };
 
 // Export from 'src/util.zig'
@@ -1143,32 +1152,32 @@ pub const util = struct {
             else => T,
         };
     }
-
+    
     pub fn baseTypeOf(v: anytype) type {
         return baseType(@TypeOf(v));
     }
-
+    
     pub fn isUIntType(T: type) ?u16 {
         return switch (@typeInfo(T)) {
             .int => |info| if (info.signedness == std.builtin.Signedness.unsigned) info.bits else null,
             else => null,
         };
     }
-
+    
     pub fn isIntType(T: type) ?u16 {
         return switch (@typeInfo(T)) {
             .int => |info| if (info.signedness == std.builtin.Signedness.signed) info.bits else null,
             else => null,
         };
     }
-
+    
     pub fn isBoolType(T: type) bool {
         return switch (@typeInfo(T)) {
             .bool => true,
             else => false,
         };
     }
-
+    
     pub fn isStringType(T: type) bool {
         const BaseT = baseType(T);
         if (BaseT != u8)
@@ -1183,20 +1192,21 @@ pub const util = struct {
         const Str = @TypeOf(str);
         return isStringType(Str);
     }
-
+    
     pub fn isEven(v: anytype) bool {
         return v % 2 == 0;
     }
     pub fn isOdd(v: anytype) bool {
         return v % 2 == 1;
     }
-
+    
     pub fn arrayLenOf(T: type) usize {
         return switch (@typeInfo(T)) {
             .array => |a| a.len,
             else => @compileError("Expected T to be an array"),
         };
     }
+    
 };
 
 // Export from 'src/comm.zig'
@@ -1206,9 +1216,9 @@ pub const comm = struct {
     // - Composites are writter as id-body-close where id should be even and >= 2
     // - Ids and size are written as a VLC, big-endian, msbit indicates if a next byte will follow
     // - close == 1
-
+    
     // &todo: Replace id arg for read/write funcs with comptime and check for its even/oddness
-
+    
     // sw: SimpleWriter
     // - sw.writeAll()
     // sr: SimpleReader
@@ -1219,12 +1229,12 @@ pub const comm = struct {
     // tr: TreeReader
     // - tw.readLeaf()
     // - tw.readComposite()
-
+    
     pub const Error = error{
         TooLarge,
         ExpectedId,
     };
-
+    
     // An Id identifies the type/field that is being sedes within some parent context
     // 0/1 are reserved for internal use
     // Composites must be even, Leafs must be odd
@@ -1237,12 +1247,12 @@ pub const comm = struct {
     pub fn isComposite(id: Id) bool {
         return util.isEven(id) and id >= 2;
     }
-
+    
     pub const TreeWriter = struct {
         const Self = @This();
-
+    
         out: *std.Io.Writer,
-
+    
         pub fn writeLeaf(self: Self, obj: anytype, id: Id) !void {
             const T = @TypeOf(obj);
             if (comptime util.isStringType(T)) {
@@ -1256,7 +1266,7 @@ pub const comm = struct {
             } else {
                 var counter = Counter{};
                 try obj.writeLeaf(&counter.interface);
-
+    
                 if (!isLeaf(id))
                     std.debug.panic("Leaf '{s}' should have odd Id, not {},", .{ @typeName(T), id });
                 try writeVLC(id, self.out);
@@ -1270,22 +1280,22 @@ pub const comm = struct {
             try writeVLC(id, self.out);
             try obj.writeComposite(self);
             try writeVLC(close, self.out);
-
+    
             // &perf: maybe it is better to leave this to the caller for ultimate performance?
             try self.out.flush();
         }
     };
-
+    
     pub const TreeReader = struct {
         const Self = @This();
         const Header = struct {
             id: Id,
             size: usize = 0,
         };
-
+    
         in: *std.Io.Reader,
         header: ?Header = null,
-
+    
         // Returns false if there is a Id mismatch
         pub fn readLeaf(self: *Self, obj: anytype, id: Id, ctx: anytype) !bool {
             const T = @TypeOf(obj.*);
@@ -1311,26 +1321,26 @@ pub const comm = struct {
                 return ret;
             } else {
                 const header = try self.readHeader();
-
+    
                 if (!isLeaf(header.id))
                     return false;
                 if (id != header.id)
                     return false;
-
+    
                 const size = header.size;
                 self.header = null;
-
+    
                 try obj.readLeaf(size, self.in, ctx);
-
+    
                 return true;
             }
         }
-
+    
         // Returns false if there is a Id mismatch
         pub fn readComposite(self: *Self, obj: anytype, id: Id) !bool {
             {
                 const header = try self.readHeader();
-
+    
                 if (!isComposite(header.id)) {
                     std.debug.print("Expected composite, received {}\n", .{header.id});
                     return false;
@@ -1341,9 +1351,9 @@ pub const comm = struct {
                 }
                 self.header = null;
             }
-
+    
             try obj.readComposite(self);
-
+    
             {
                 const header = try self.readHeader();
                 if (header.id != close) {
@@ -1352,27 +1362,27 @@ pub const comm = struct {
                 }
                 self.header = null;
             }
-
+    
             return true;
         }
-
+    
         pub fn readHeader(self: *Self) !Header {
             if (self.header) |header|
                 return header;
-
+    
             const id = try readVLC(Id, self.in);
             const size = if (isLeaf(id)) try readVLC(usize, self.in) else 0;
             const header = Header{ .id = id, .size = size };
             self.header = header;
             return header;
         }
-
+    
         pub fn isClose(self: *Self) !bool {
             const header = try self.readHeader();
             return header.id == close;
         }
     };
-
+    
     // Util for working with a SimpleWriter
     pub fn writeUInt(u: anytype, io: *std.Io.Writer) !void {
         const T = @TypeOf(u);
@@ -1399,14 +1409,14 @@ pub const comm = struct {
         }
         return u;
     }
-
+    
     pub fn writeInt(i: anytype, io: *std.Io.Writer) !void {
         const ii: i128 = @intCast(i);
         var uu: u128 = @bitCast(ii);
-
+    
         const cl = if (ii >= 0) @clz(uu) else @clz(~uu);
         const len = (@bitSizeOf(u128) - cl) / 8 + 1;
-
+    
         var buffer: [@sizeOf(u128)]u8 = undefined;
         for (0..len) |ix| {
             buffer[len - ix - 1] = @truncate(uu);
@@ -1431,22 +1441,22 @@ pub const comm = struct {
         const i: i128 = @bitCast(u);
         return @intCast(i);
     }
-
+    
     pub fn writeVLC(u: anytype, io: *std.Io.Writer) !void {
         var uu: u128 = u;
         const max_byte_count = (@bitSizeOf(@TypeOf(uu)) + 6) / 7;
-
+    
         var buffer: [max_byte_count]u8 = undefined;
         const len = @max((@bitSizeOf(@TypeOf(uu)) - @clz(uu) + 6) / 7, 1);
         for (0..len) |ix| {
             const data: u7 = @truncate(uu);
             uu >>= 7;
-
+    
             const msbit: u8 = if (ix == 0) 0x00 else 0x80;
-
+    
             buffer[len - ix - 1] = msbit | @as(u8, data);
         }
-
+    
         try io.writeAll(buffer[0..len]);
     }
     // Note: If reading a VLC of type T fails (eg., due to size constraint), there is no roll-back on 'sr'
@@ -1460,37 +1470,37 @@ pub const comm = struct {
             const data: u7 = @truncate(byte);
             uu <<= 7;
             uu |= @as(u128, data);
-
+    
             // Check msbit to see if we need to continue
             const msbit = byte >> 7;
             if (msbit == 0)
                 break;
-
+    
             if (ix + 1 == max_byte_count)
                 return Error.TooLarge;
         }
         return std.math.cast(T, uu) orelse return Error.TooLarge;
     }
-
+    
     // SimpleWriter that counts the byte size of a leaf
     const Counter = struct {
         const Self = @This();
         const vtable: std.Io.Writer.VTable = .{ .drain = drain };
-
+    
         size: usize = 0,
         interface: std.Io.Writer = .{ .vtable = &vtable, .buffer = &.{} },
-
+    
         pub fn writeAll(self: *Self, ary: []const u8) !void {
             self.size += ary.len;
         }
-
+    
         fn drain(w: *std.Io.Writer, data: []const []const u8, _: usize) std.Io.Writer.Error!usize {
             const self: *Counter = @fieldParentPtr("interface", w);
             self.size += data[0].len;
             return data[0].len;
         }
     };
-
+    
     // Wrapper classes for primitives to support obj.writeLeaf()
     const String = struct {
         const Self = @This();
@@ -1536,6 +1546,7 @@ pub const comm = struct {
             self.b = if (u == 0) false else true;
         }
     };
+    
 };
 
 // Export from 'src/pipe.zig'
@@ -1556,14 +1567,14 @@ pub const pipe = struct {
             mutex: std.Io.Mutex = .init,
             cond: std.Io.Condition = .init,
             data: [2][]u8 = undefined,
-
+    
             fn isEmpty(i: @This()) bool {
                 return i.len == 0;
             }
             fn is_full(i: @This()) bool {
                 return i.len == i.buffer.len;
             }
-
+    
             fn first(i: @This()) []const u8 {
                 const len = @min(i.len, i.buffer.len - i.head);
                 return i.buffer[i.head .. i.head + len];
@@ -1626,11 +1637,11 @@ pub const pipe = struct {
                 }
             }
         };
-
+    
         writer: std.Io.Writer,
         intern: Intern,
         reader: std.Io.Reader,
-
+    
         pub fn init(io: std.Io, wb: []u8, ib: []u8, rb: []u8) Self {
             return Self{
                 .writer = .{
@@ -1652,7 +1663,7 @@ pub const pipe = struct {
         pub fn deinit(self: *Self) void {
             _ = self;
         }
-
+    
         pub fn format(self: Self, w: *std.Io.Writer) !void {
             try w.print(
                 \\[Pipe]{{
@@ -1665,37 +1676,37 @@ pub const pipe = struct {
                 .{
                     self.writer.end,
                     self.writer.buffer[0..self.writer.end],
-
+    
                     self.intern.head,
                     self.intern.len,
                     self.intern.first(),
                     self.intern.second(),
-
+    
                     self.reader.seek,
                     self.reader.end,
                     self.reader.buffer[self.reader.seek..self.reader.end],
                 },
             );
         }
-
+    
         fn drain(w: *std.Io.Writer, data: []const []const u8, splat: usize) !usize {
             _ = splat;
-
+    
             const p: *Pipe = @fieldParentPtr("writer", w);
             var intern = &p.intern;
-
+    
             const copy_from_buffer = w.end > 0;
             var src = if (copy_from_buffer) w.buffer[0..w.end] else data[0];
             const orig_src_len = src.len;
-
+    
             {
                 intern.mutex.lock(intern.io) catch {};
                 defer intern.mutex.unlock(intern.io);
-
+    
                 while (intern.is_full()) {
                     intern.cond.wait(intern.io, &intern.mutex) catch {};
                 }
-
+    
                 // Copy `src` into intern
                 for (intern.unused()) |dst| {
                     const count = @min(dst.len, src.len);
@@ -1703,7 +1714,7 @@ pub const pipe = struct {
                     intern.len += count;
                     src = src[count..];
                 }
-
+    
                 if (copy_from_buffer) {
                     // Move the remainder to the front, if any
                     if (src.len > 0) {
@@ -1712,34 +1723,34 @@ pub const pipe = struct {
                     w.end = src.len;
                 }
             }
-
+    
             intern.cond.signal(intern.io);
-
+    
             return if (copy_from_buffer) 0 else orig_src_len - src.len;
         }
-
+    
         fn stream(r: *std.Io.Reader, _: *std.Io.Writer, limit: std.Io.Limit) !usize {
             _ = limit;
-
+    
             const p: *Pipe = @fieldParentPtr("reader", r);
             var intern = &p.intern;
-
+    
             {
                 intern.mutex.lock(intern.io) catch {};
                 defer intern.mutex.unlock(intern.io);
-
+    
                 while (intern.isEmpty()) {
                     intern.cond.wait(intern.io, &intern.mutex) catch {};
                 }
-
+    
                 if (r.seek == r.end) {
                     // All buffered data was read: reset the internal pointers to maximize read buffer size
                     r.seek = 0;
                     r.end = 0;
                 }
-
+    
                 var dst = r.buffer[r.end..];
-
+    
                 // Copy internal data to r.buffer
                 for (intern.used()) |src| {
                     const count = @min(dst.len, src.len);
@@ -1753,12 +1764,13 @@ pub const pipe = struct {
                     intern.head -= intern.buffer.len;
                 }
             }
-
+    
             intern.cond.signal(intern.io);
-
+    
             return 0;
         }
     };
+    
 };
 
 // Export from 'src/fs.zig'
@@ -1768,36 +1780,36 @@ pub const fs = struct {
         CouldNotFindHome,
         CouldNotReadAll,
     };
-
+    
     pub const Path = struct {
         const Self = @This();
         pub const max_len = std.fs.max_path_bytes;
-
+    
         buffer: [Self.max_len]u8 = undefined,
         len: usize = 0,
-
+    
         pub fn set(self: *Self, str: []const u8) !void {
             if (str.len > max_len)
                 return Error.BufferTooSmall;
             self.len = str.len;
             @memmove(self.buffer[0..self.len], str);
         }
-
+    
         // Use env.envmap
         pub fn home(envmap: *const std.process.Environ.Map) !Self {
             const name = if (builtin.os.tag == .windows) "USERPROFILE" else "HOME";
             const value = envmap.get(name) orelse return error.CouldNotFindHome;
-
+    
             var res = Self{};
-
+    
             if (value.len > max_len)
                 return error.BufferTooSmall;
             res.len = value.len;
-
+    
             @memmove(res.buffer[0..res.len], value);
             return res;
         }
-
+    
         pub fn add(self: *Self, part: []const u8) !void {
             if (self.len + 1 + part.len > max_len)
                 return Error.BufferTooSmall;
@@ -1808,17 +1820,17 @@ pub const fs = struct {
             @memmove(self.buffer[self.len .. self.len + part.len], part);
             self.len += part.len;
         }
-
+    
         pub fn path(self: *const Self) []const u8 {
             return self.buffer[0..self.len];
         }
-
+    
         pub fn exists(self: *const Self, io: std.Io) bool {
             const file = std.Io.Dir.openFileAbsolute(io, self.path(), .{}) catch return false;
             defer file.close(io);
             return true;
         }
-
+    
         pub fn read(self: *const Self, io: std.Io, a: std.mem.Allocator) ![]u8 {
             const file = try std.Io.Dir.openFileAbsolute(io, self.path(), .{});
             defer file.close(io);
@@ -1841,11 +1853,11 @@ pub const fs = struct {
             return content[0..stat.size :0];
         }
     };
-
+    
     pub fn cwdPathAlloc(io: std.Io, a: std.mem.Allocator, maybe_part: ?[]const u8) ![:0]u8 {
         return try std.Io.Dir.cwd().realPathFileAlloc(io, maybe_part orelse ".", a);
     }
-
+    
     pub fn isDirectory(io: std.Io, path: []const u8) bool {
         const err_dir =
             if (std.fs.path.isAbsolute(path))
@@ -1854,7 +1866,7 @@ pub const fs = struct {
                 std.Io.Dir.cwd().openDir(io, path, .{});
         return if (err_dir) |_| true else |_| false;
     }
-
+    
     pub fn deleteTree(io: std.Io, path: []const u8) !void {
         if (std.fs.path.isAbsolute(path)) {
             var dir = try std.Io.Dir.openDirAbsolute(io, path, .{});
@@ -1862,16 +1874,17 @@ pub const fs = struct {
             try dir.deleteTree(io, ".");
         } else try std.Io.Dir.cwd().deleteTree(io, path);
     }
+    
 };
 
 // Export from 'src/fmt.zig'
 pub const fmt = struct {
     pub const Iso = struct {
         const T = u128;
-
+    
         v: T,
         nano: bool = false,
-
+    
         pub fn format(self: @This(), w: *std.Io.Writer) !void {
             if (self.nano)
                 try self.format_(w, 1_000_000_000_000_000_000, &[_][]const u8{ "G", "M", "k", "_", "m", "u", "n" })
@@ -1880,15 +1893,15 @@ pub const fmt = struct {
         }
         pub fn format_(self: @This(), w: *std.Io.Writer, dd: T, postfixes: []const []const u8) !void {
             var d = dd;
-
+    
             var v = self.v;
             var first: bool = true;
             for (postfixes, 0..) |postfix, ix0| {
                 const last = ix0 + 1 == postfixes.len;
-
+    
                 const n = v / d;
                 const r = v % d;
-
+    
                 if (n > 0 or !first or last) {
                     if (first)
                         try w.print("{}{s}", .{ n, postfix })
@@ -1896,17 +1909,18 @@ pub const fmt = struct {
                         try w.print("{:0>3}{s}", .{ n, postfix });
                     first = false;
                 }
-
+    
                 v = r;
                 d /= 1000;
             }
         }
     };
-
+    
     pub fn iso(v: anytype, nano: bool) Iso {
         return .{
             .v = @intCast(v),
             .nano = nano,
         };
     }
+    
 };
