@@ -21,11 +21,9 @@ pub fn main(init: std.process.Init) !void {
     var cfg_loader: cfg.Loader = .{};
     try cfg_loader.init(env);
     defer cfg_loader.deinit();
-    try cfg_loader.load(init.minimal.args);
+    try cfg_loader.load(init.minimal.args, &env_inst.log);
 
     const config = &cfg_loader.config;
-
-    env_inst.log.setLevel(config.verbose);
 
     if (config.print_help) {
         try cfg_loader.printHelp(env.stdout);

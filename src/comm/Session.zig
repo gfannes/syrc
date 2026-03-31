@@ -385,10 +385,13 @@ fn doRun(self: *Self, run: prot.Run, folder: []const u8) !void {
     defer folder_dir.close(self.env.io);
 
     var environ_map = try self.env.envmap.clone(self.env.a);
+    defer environ_map.deinit();
     for (run.defines.items) |define| {
         if (define.value) |value| {
+            std.debug.print("Adding define {s}={s}\n", .{ define.key, value });
             try environ_map.put(define.key, value);
         } else {
+            std.debug.print("Removing define {s}\n", .{define.key});
             _ = environ_map.swapRemove(define.key);
         }
     }

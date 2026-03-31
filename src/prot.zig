@@ -76,8 +76,7 @@ pub const Hello = struct {
             return error.ExpectedName;
 
         var str: []const u8 = undefined;
-        if (try tr.readLeaf(&str, 5, self.a))
-            self.suffix = str;
+        self.suffix = if (try tr.readLeaf(&str, 5, self.a)) str else null;
     }
 };
 
@@ -178,18 +177,12 @@ pub const FileState = struct {
     pub fn readComposite(self: *Self, tr: anytype) !void {
         {
             var id: u64 = undefined;
-            self.id = if (try tr.readLeaf(&id, 3, {}))
-                id
-            else
-                null;
+            self.id = if (try tr.readLeaf(&id, 3, {})) id else null;
         }
 
         {
             var path: []const u8 = &.{};
-            self.path = if (try tr.readLeaf(&path, 5, self.a))
-                path
-            else
-                null;
+            self.path = if (try tr.readLeaf(&path, 5, self.a)) path else null;
         }
 
         if (!try tr.readLeaf(&self.name, 7, self.a))
@@ -208,10 +201,7 @@ pub const FileState = struct {
 
         {
             var timestamp: Timestamp = undefined;
-            self.timestamp = if (try tr.readLeaf(&timestamp, 11, {}))
-                timestamp
-            else
-                null;
+            self.timestamp = if (try tr.readLeaf(&timestamp, 11, {})) timestamp else null;
         }
 
         {
@@ -279,10 +269,7 @@ pub const Missing = struct {
     }
     pub fn readComposite(self: *Self, tr: anytype) !void {
         var id: u64 = undefined;
-        self.id = if (try tr.readLeaf(&id, 3, {}))
-            id
-        else
-            null;
+        self.id = if (try tr.readLeaf(&id, 3, {})) id else null;
     }
 };
 
@@ -318,15 +305,11 @@ pub const Content = struct {
     }
     pub fn readComposite(self: *Self, tr: anytype) !void {
         var id: u64 = undefined;
-        self.id = if (try tr.readLeaf(&id, 3, {}))
-            id
-        else
-            null;
+        self.id = if (try tr.readLeaf(&id, 3, {})) id else null;
 
         const a = self.a orelse return error.NoAllocatorSet;
         var str: []const u8 = &.{};
-        if (try tr.readLeaf(&str, 5, a))
-            self.str = str;
+        self.str = if (try tr.readLeaf(&str, 5, a)) str else null;
     }
 };
 
@@ -422,8 +405,7 @@ pub const Run = struct {
                     return error.ExpectedKey;
 
                 var value: []const u8 = undefined;
-                if (try tr.readLeaf(&value, 13, self.a))
-                    define.value = value;
+                define.value = if (try tr.readLeaf(&value, 13, self.a)) value else null;
             }
         }
     }
@@ -464,10 +446,8 @@ pub const Output = struct {
     }
     pub fn readComposite(self: *Self, tr: anytype) !void {
         var str: []const u8 = undefined;
-        if (try tr.readLeaf(&str, 3, self.a))
-            self.stdout = str;
-        if (try tr.readLeaf(&str, 5, self.a))
-            self.stderr = str;
+        self.stdout = if (try tr.readLeaf(&str, 3, self.a)) str else null;
+        self.stderr = if (try tr.readLeaf(&str, 5, self.a)) str else null;
     }
 };
 
@@ -512,14 +492,10 @@ pub const Done = struct {
     }
     pub fn readComposite(self: *Self, tr: anytype) !void {
         var tmp: u32 = undefined;
-        if (try tr.readLeaf(&tmp, 3, {}))
-            self.exit = tmp;
-        if (try tr.readLeaf(&tmp, 5, {}))
-            self.signal = tmp;
-        if (try tr.readLeaf(&tmp, 7, {}))
-            self.stop = tmp;
-        if (try tr.readLeaf(&tmp, 9, {}))
-            self.unknown = tmp;
+        self.exit = if (try tr.readLeaf(&tmp, 3, {})) tmp else null;
+        self.signal = if (try tr.readLeaf(&tmp, 5, {})) tmp else null;
+        self.stop = if (try tr.readLeaf(&tmp, 7, {})) tmp else null;
+        self.unknown = if (try tr.readLeaf(&tmp, 9, {})) tmp else null;
     }
 };
 
