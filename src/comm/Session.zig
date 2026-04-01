@@ -185,16 +185,15 @@ pub fn runClient(self: *Self, reset_folder: bool, cleanup_folder: bool, reset_st
 }
 
 pub fn runServer(self: *Self) !void {
-    var bye = prot.Bye.init(self.env.a);
-    defer bye.deinit();
+    var arena = std.heap.ArenaAllocator.init(self.env.a);
+    defer arena.deinit();
+    const aa = arena.allocator();
+
+    var bye = prot.Bye.init(aa);
 
     // Handshake
+    var hello: prot.Hello = .{ .a = aa };
     {
-        var aa = std.heap.ArenaAllocator.init(self.env.a);
-        defer aa.deinit();
-        const a = aa.allocator();
-
-        var hello: prot.Hello = .{ .a = a };
         if (try self.cio.receive2(&hello, &bye)) {
             if (self.env.log.level(1)) |w|
                 prot.printMessage(hello, w, null);
@@ -203,7 +202,7 @@ pub fn runServer(self: *Self) !void {
                 try self.cio.send(bye);
                 return error.VersionMismatch;
             }
-            try self.cio.send(prot.Hello{ .a = self.env.a, .role = .Client, .status = .Ok, .name = self.name, .suffix = self.suffix });
+            try self.cio.send(prot.Hello{ .a = aa, .role = .Client, .status = .Ok, .name = self.name, .suffix = self.suffix });
         } else {
             if (self.env.log.level(1)) |w|
                 prot.printMessage(bye, w, null);
@@ -213,7 +212,6 @@ pub fn runServer(self: *Self) !void {
 
     // Sync
     var folder: []const u8 = &.{};
-    defer self.env.a.free(folder);
     {
         var sync: prot.Sync = .{};
 
@@ -228,23 +226,23 @@ pub fn runServer(self: *Self) !void {
         }
 
         {
-            // &todo: use hello.name and suffix iso tmp
-            folder = try std.fs.path.join(self.env.a, &[_][]const u8{ self.base, "syrc-tmp" });
+            var parts = [_][]const u8{ "syrc", hello.name, &.{} };
+            var slice: [][]const u8 = &parts;
+            if (hello.suffix) |suffix| {
+                slice[2] = suffix;
+            } else {
+                slice.len = 2;
+            }
+            const name = try std.mem.join(aa, "-", slice);
+            folder = try std.fs.path.join(aa, &[_][]const u8{ self.base, name });
 
-            var aa = std.heap.ArenaAllocator.init(self.env.a);
-            defer aa.deinit();
-            const a = aa.allocator();
-
-            try self.receiveFolderFromPeer(a, folder, sync.reset_folder);
+            try self.receiveFolderFromPeer(aa, folder, sync.reset_folder);
         }
     }
 
     // Run
     {
-        var aa = std.heap.ArenaAllocator.init(self.env.a);
-        defer aa.deinit();
-
-        var run = prot.Run.init(aa.allocator());
+        var run = prot.Run.init(aa);
 
         if (try self.cio.receive(&run)) {
             if (self.env.log.level(1)) |w|

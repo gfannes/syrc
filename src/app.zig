@@ -71,7 +71,7 @@ pub const App = struct {
             .address = addr,
         };
         defer client.deinit();
-        try client.init(self.config.base, try self.gocStore(), "testclient");
+        try client.init(self.config.base, try self.gocStore(), "testclient", null);
 
         client.setRunCommand(self.config.extra.items);
 
@@ -96,7 +96,7 @@ pub const App = struct {
             .address = try self.address(),
             .store = try self.gocStore(),
             .folder = self.config.base,
-            .name = "server",
+            .name = self.config.name,
         };
         defer server.deinit();
         try server.init();
@@ -117,7 +117,7 @@ pub const App = struct {
             .address = try self.address(),
         };
         defer client.deinit();
-        try client.init(self.config.base, try self.gocStore(), "client");
+        try client.init(self.config.base, try self.gocStore(), self.config.name, self.config.suffix);
 
         client.setRunCommand(self.config.extra.items);
 

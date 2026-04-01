@@ -26,13 +26,13 @@ pub const Client = struct {
 
     session: comm.Session = undefined,
 
-    pub fn init(self: *Self, folder: []const u8, store: *blob.Store, name: []const u8) !void {
+    pub fn init(self: *Self, folder: []const u8, store: *blob.Store, name: []const u8, suffix: ?[]const u8) !void {
         if (self.env.log.level(1)) |w|
             try w.print("Connecting to {f}\n", .{self.address});
 
         var stream = try self.address.connect(self.env.io, .{ .mode = .stream });
         errdefer stream.close();
-        self.session = comm.Session{ .env = self.env, .base = folder, .store = store, .name = name };
+        self.session = comm.Session{ .env = self.env, .base = folder, .store = store, .name = name, .suffix = suffix };
         try self.session.init(stream);
     }
     pub fn deinit(self: *Self) void {
