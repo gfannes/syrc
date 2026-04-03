@@ -1,4 +1,6 @@
 const std = @import("std");
+const builtin = @import("builtin");
+
 const crypto = @import("crypto.zig");
 const dto = @import("dto.zig");
 const rubr = @import("rubr.zig");
@@ -119,6 +121,20 @@ pub const FileState = struct {
     pub const Attributes = struct {
         write: bool = false,
         execute: bool = false,
+
+        pub fn permissions(my: @This()) std.Io.File.Permissions {
+            switch (builtin.os.tag) {
+                .linux => {
+                    var mode: std.posix.mode_t = 0o444;
+                    if (my.write)
+                        mode |= 0o222;
+                    if (my.execute)
+                        mode |= 0o100;
+                    return .fromMode(mode);
+                },
+                else => return std.Io.File.Permissions.default_file,
+            }
+        }
     };
     pub const Timestamp = u32;
 
@@ -454,11 +470,13 @@ pub const Output = struct {
 pub const Done = struct {
     const Self = @This();
     pub const Id = 16;
+    pub const Failure = enum(u32) { FileNotFound, AccessDenied, Unknown };
 
     exit: ?u32 = null,
     signal: ?u32 = null,
     stop: ?u32 = null,
     unknown: ?u32 = null,
+    failure: ?Failure = null,
 
     pub fn init() Self {
         return Self{};
@@ -478,6 +496,8 @@ pub const Done = struct {
             node.attr("stop", stop);
         if (self.unknown) |unknown|
             node.attr("unknown", unknown);
+        if (self.failure) |failure|
+            node.attr("failure", failure);
     }
 
     pub fn writeComposite(self: Self, tw: anytype) !void {
@@ -489,13 +509,18 @@ pub const Done = struct {
             try tw.writeLeaf(stop, 7);
         if (self.unknown) |unknown|
             try tw.writeLeaf(unknown, 9);
+        if (self.failure) |failure| {
+            const u: u32 = @intFromEnum(failure);
+            try tw.writeLeaf(u, 11);
+        }
     }
     pub fn readComposite(self: *Self, tr: anytype) !void {
-        var tmp: u32 = undefined;
-        self.exit = if (try tr.readLeaf(&tmp, 3, {})) tmp else null;
-        self.signal = if (try tr.readLeaf(&tmp, 5, {})) tmp else null;
-        self.stop = if (try tr.readLeaf(&tmp, 7, {})) tmp else null;
-        self.unknown = if (try tr.readLeaf(&tmp, 9, {})) tmp else null;
+        var u: u32 = undefined;
+        self.exit = if (try tr.readLeaf(&u, 3, {})) u else null;
+        self.signal = if (try tr.readLeaf(&u, 5, {})) u else null;
+        self.stop = if (try tr.readLeaf(&u, 7, {})) u else null;
+        self.unknown = if (try tr.readLeaf(&u, 9, {})) u else null;
+        self.failure = if (try tr.readLeaf(&u, 11, {})) @enumFromInt(u) else null;
     }
 };
 

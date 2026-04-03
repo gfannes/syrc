@@ -6,6 +6,7 @@ const rubr = @import("rubr.zig");
 
 pub const Error = error{
     ExpectedDir,
+    UnsupportedPlatform,
 };
 
 pub const Key = crypto.Checksum;
@@ -132,11 +133,7 @@ pub const Store = struct {
             try writer.interface.flush();
 
             if (attributes) |attr| {
-                var permissions = std.Io.File.Permissions.default_file;
-                permissions = permissions.setReadOnly(!attr.write);
-                // &todo support executable permission
-                if (builtin.os.tag != .windows)
-                    try file.setPermissions(self.env.io, permissions);
+                try file.setPermissions(self.env.io, attr.permissions());
             }
         }
 

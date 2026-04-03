@@ -74,7 +74,6 @@ pub fn deinit(self: *Self) void {
 }
 
 pub fn runClient(self: *Self, reset_folder: bool, cleanup_folder: bool, reset_store: bool, collect: bool, defines: []dto.Define) !void {
-    std.debug.print("session.runClient\n", .{});
     var bye = prot.Bye.init(self.env.a);
     defer bye.deinit();
 
@@ -348,8 +347,14 @@ fn doSync(self: *Self, folder: []const u8, reset: bool, tree: fs.Tree) !void {
                 var reader = f.reader(self.env.io, &rbuf);
                 try reader.interface.readSliceAll(tmp.items);
                 const cs = crypto.checksum(tmp.items);
-                if (std.mem.eql(u8, &cs, &checksum))
-                    do_extract = false;
+
+                do_extract = false;
+                if (!std.mem.eql(u8, &cs, &checksum))
+                    do_extract = true;
+                if (file.attributes) |attr| {
+                    if (attr.permissions() != stat.permissions)
+                        do_extract = true;
+                }
             } else |_| {
                 if (self.env.log.level(1)) |w|
                     try w.print("\tCould not find {s}\n", .{file.name});
@@ -402,28 +407,36 @@ fn doRun(self: *Self, run: prot.Run, folder: []const u8) !void {
         .environ_map = &environ_map,
     };
 
-    var proc = try std.process.spawn(self.env.io, options);
-
-    {
-        // Reading data from stdout/stderr crossplatform nonblocking seems most easy using MT
-        self.maybe_stdout = proc.stdout;
-        self.maybe_stderr = proc.stderr;
-        var thread_stdout = try std.Thread.spawn(.{}, processOutputStdout, .{self});
-        defer thread_stdout.join();
-        var thread_stderr = try std.Thread.spawn(.{}, processOutputStderr, .{self});
-        defer thread_stderr.join();
-    }
-
-    const term = try proc.wait(self.env.io);
-    if (self.env.log.level(1)) |w|
-        try w.print("term: {}\n", .{term});
-
     var done = prot.Done{};
-    switch (term) {
-        .exited => |v| done.exit = v,
-        .signal => |v| done.signal = @intFromEnum(v),
-        .stopped => |v| done.stop = v,
-        .unknown => |v| done.unknown = v,
+    var err_proc = std.process.spawn(self.env.io, options);
+    if (err_proc) |*proc| {
+        {
+            // Reading data from stdout/stderr crossplatform nonblocking seems most easy using MT
+            self.maybe_stdout = proc.stdout;
+            self.maybe_stderr = proc.stderr;
+            var thread_stdout = try std.Thread.spawn(.{}, processOutputStdout, .{self});
+            defer thread_stdout.join();
+            var thread_stderr = try std.Thread.spawn(.{}, processOutputStderr, .{self});
+            defer thread_stderr.join();
+        }
+
+        const term = try proc.wait(self.env.io);
+        if (self.env.log.level(1)) |w|
+            try w.print("term: {}\n", .{term});
+
+        switch (term) {
+            .exited => |v| done.exit = v,
+            .signal => |v| done.signal = @intFromEnum(v),
+            .stopped => |v| done.stop = v,
+            .unknown => |v| done.unknown = v,
+        }
+    } else |err| {
+        try self.env.log.err("Could not spawn process: {}\n", .{err});
+        done.failure = switch (err) {
+            error.FileNotFound => .FileNotFound,
+            error.AccessDenied => .AccessDenied,
+            else => .Unknown,
+        };
     }
     try self.cio.send(done);
 }

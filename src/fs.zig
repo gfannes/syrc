@@ -87,10 +87,10 @@ pub fn collectTree(env: Env, folder: []const u8) !Tree {
                     filestate.path = try my.env.a.dupe(u8, path[offsets.base .. offsets.name - 1]);
                 filestate.name = try my.env.a.dupe(u8, path[offsets.name..]);
 
-                // &todo fix execute mode
+                const execute = if (std.Io.File.Permissions.has_executable_bit) (stat.permissions.toMode() & 0o100) != 0 else false;
                 filestate.attributes = .{
                     .write = !stat.permissions.readOnly(),
-                    .execute = false,
+                    .execute = execute,
                 };
 
                 var content: []u8 = &.{};
