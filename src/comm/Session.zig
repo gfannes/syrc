@@ -349,11 +349,20 @@ fn doSync(self: *Self, folder: []const u8, reset: bool, tree: fs.Tree) !void {
                 const cs = crypto.checksum(tmp.items);
 
                 do_extract = false;
-                if (!std.mem.eql(u8, &cs, &checksum))
+                if (!std.mem.eql(u8, &cs, &checksum)) {
                     do_extract = true;
+                }
                 if (file.attributes) |attr| {
-                    if (attr.permissions() != stat.permissions)
+                    // We keep only the 3x3 lsbits and compare those
+                    const attr_perm: u9 = @truncate(@intFromEnum(attr.permissions()));
+                    const stat_perm: u9 = @truncate(@intFromEnum(stat.permissions));
+                    if (attr_perm != stat_perm) {
+                        // &todo: iso forcing a full extract when only the permissions need an update
+                        // it would be faster to simply update the permission itself. Then again, not
+                        // many files are expected to be already present with the correct state but
+                        // wrong permissions.
                         do_extract = true;
+                    }
                 }
             } else |_| {
                 if (self.env.log.level(1)) |w|
@@ -427,7 +436,7 @@ fn doRun(self: *Self, run: prot.Run, folder: []const u8) !void {
         switch (term) {
             .exited => |v| done.exit = v,
             .signal => |v| done.signal = @intFromEnum(v),
-            .stopped => |v| done.stop = v,
+            .stopped => |v| done.stop = @intFromEnum(v),
             .unknown => |v| done.unknown = v,
         }
     } else |err| {
