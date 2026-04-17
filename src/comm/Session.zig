@@ -131,10 +131,8 @@ pub fn runClient(self: *Self, reset_folder: bool, cleanup_folder: bool, reset_st
         }
 
         try self.cio.send(run);
-        if (self.env.log.level(1)) |w| {
-            try w.print("Sent Run command\n", .{});
-            try w.flush();
-        }
+        if (self.env.log.level(1)) |w|
+            try rubr.flush.print(w, "Sent Run command\n", .{});
 
         var output_indicator = Output.Indicator{};
         while (true) {
@@ -162,10 +160,8 @@ pub fn runClient(self: *Self, reset_folder: bool, cleanup_folder: bool, reset_st
                 break;
             }
         }
-        if (self.env.log.level(1)) |w| {
-            try w.print("Received all output from Run command\n", .{});
-            try w.flush();
-        }
+        if (self.env.log.level(1)) |w|
+            try rubr.flush.print(w, "Received all output from Run command\n", .{});
 
         // Collect
         if (collect) {
@@ -270,10 +266,8 @@ pub fn runServer(self: *Self) !void {
 fn doSync(self: *Self, folder: []const u8, reset: bool, tree: fs.Tree) !void {
     // Delete `folder` if necessary
     if (reset) {
-        if (self.env.log.level(1)) |w| {
-            try w.print("Deleting {s}\n", .{folder});
-            try w.flush();
-        }
+        if (self.env.log.level(1)) |w|
+            try rubr.flush.print(w, "Deleting {s}\n", .{folder});
         std.Io.Dir.cwd().deleteTree(self.env.io, folder) catch {};
     }
 
@@ -316,19 +310,15 @@ fn doSync(self: *Self, folder: []const u8, reset: bool, tree: fs.Tree) !void {
     var d = D{ .io = self.env.io, .folder = try std.Io.Dir.cwd().createDirPathOpen(self.env.io, folder, .{}) };
     defer d.deinit();
 
-    if (self.env.log.level(1)) |w| {
-        try w.print("Reconstructing the Tree...\n", .{});
-        try w.flush();
-    }
+    if (self.env.log.level(1)) |w|
+        try rubr.flush.print(w, "Reconstructing the Tree...\n", .{});
     var tmp = std.ArrayList(u8).empty;
     defer tmp.deinit(self.env.a);
     var extract_count: u64 = 0;
     for (tree.filestates.items, 0..) |file, count| {
         if (self.env.log.level(1)) |w| {
-            if (@popCount(count) <= 1) {
-                try w.print("\t{}: extracted {}\n", .{ count, extract_count });
-                try w.flush();
-            }
+            if (@popCount(count) <= 1)
+                try rubr.flush.print(w, "\t{}: extracted {}\n", .{ count, extract_count });
         }
 
         const checksum = file.checksum orelse return error.ExpectedChecksum;
@@ -378,10 +368,8 @@ fn doSync(self: *Self, folder: []const u8, reset: bool, tree: fs.Tree) !void {
             extract_count += 1;
         }
     }
-    if (self.env.log.level(1)) |w| {
-        try w.print("done\n", .{});
-        try w.flush();
-    }
+    if (self.env.log.level(1)) |w|
+        try rubr.flush.print(w, "done\n", .{});
 }
 
 fn doRun(self: *Self, run: prot.Run, folder: []const u8) !void {
@@ -467,8 +455,7 @@ fn processOutput_(self: *Self, maybe_output: *?std.Io.File, kind: Output.Kind) !
 
             if (self.env.log.level(1)) |w| {
                 try output_indicator.set(kind, w, w);
-                try w.print("{s}", .{str});
-                try w.flush();
+                try rubr.flush.print(w, "{s}", .{str});
             }
 
             var outp = prot.Output.init(self.env.a);
@@ -499,6 +486,8 @@ fn sendFolderToPeer(self: *Self, folder: []const u8) !void {
 
     // Send all FileStates
     {
+        if (self.env.log.level(1)) |w|
+            try rubr.flush.print(w, "Sending {} filestates ... ", .{tree.filestates.items.len});
         for (tree.filestates.items, 0..) |filestate, count| {
             if (self.env.log.level(1)) |w|
                 prot.printMessage(filestate, w, count);
@@ -510,10 +499,8 @@ fn sendFolderToPeer(self: *Self, folder: []const u8) !void {
         const sentinel = prot.FileState.init(self.env.a);
         try self.cio.send(sentinel);
 
-        if (self.env.log.level(1)) |w| {
-            try w.print("Sent all {} FileStates\n", .{tree.filestates.items.len});
-            try w.flush();
-        }
+        if (self.env.log.level(1)) |w|
+            try rubr.flush.print(w, "OK\n", .{});
     }
 
     // Read all the Missing data
@@ -522,7 +509,7 @@ fn sendFolderToPeer(self: *Self, folder: []const u8) !void {
     for (0..std.math.maxInt(usize)) |count| {
         var missing = prot.Missing{};
         if (try self.cio.receive(&missing)) {
-            if (self.env.log.level(1)) |w|
+            if (self.env.log.level(2)) |w|
                 prot.printMessage(missing, w, count);
 
             if (missing.id) |id| {
@@ -533,10 +520,9 @@ fn sendFolderToPeer(self: *Self, folder: []const u8) !void {
             }
         }
     }
-    if (self.env.log.level(1)) |w| {
-        try w.print("Server misses {} files\n", .{missings.items.len});
-        try w.flush();
-    }
+
+    if (self.env.log.level(1)) |w|
+        try rubr.flush.print(w, "Sending {} missing files ... ", .{missings.items.len});
 
     // Send all the missing Content
     for (missings.items, 0..) |id, count| {
@@ -550,10 +536,9 @@ fn sendFolderToPeer(self: *Self, folder: []const u8) !void {
         try self.cio.send(content);
     }
     try self.cio.send(prot.Content{ .a = null });
-    if (self.env.log.level(1)) |w| {
-        try w.print("Sent all missing Content\n", .{});
-        try w.flush();
-    }
+
+    if (self.env.log.level(1)) |w|
+        try rubr.flush.print(w, "OK\n", .{});
 }
 
 fn receiveFolderFromPeer(self: *Self, a: std.mem.Allocator, folder: []const u8, reset: bool) !void {
@@ -584,10 +569,8 @@ fn receiveFolderFromPeer(self: *Self, a: std.mem.Allocator, folder: []const u8, 
                 try missings.append(a, id);
             }
         }
-        if (self.env.log.level(1)) |w| {
-            try w.print("Received {} FileStates, I miss {}\n", .{ tree.filestates.items.len, missings.items.len });
-            try w.flush();
-        }
+        if (self.env.log.level(1)) |w|
+            try rubr.flush.print(w, "Received {} FileStates, I miss {}\n", .{ tree.filestates.items.len, missings.items.len });
     }
 
     // Indicate the content we are Missing
@@ -596,10 +579,8 @@ fn receiveFolderFromPeer(self: *Self, a: std.mem.Allocator, folder: []const u8, 
             try self.cio.send(prot.Missing{ .id = id });
         }
         try self.cio.send(prot.Missing{ .id = null });
-        if (self.env.log.level(1)) |w| {
-            try w.print("Sent all Missings\n", .{});
-            try w.flush();
-        }
+        if (self.env.log.level(1)) |w|
+            try rubr.flush.print(w, "Sent all Missings\n", .{});
     }
 
     // Receive the missing Content
@@ -620,10 +601,8 @@ fn receiveFolderFromPeer(self: *Self, a: std.mem.Allocator, folder: []const u8, 
             const str = content.str orelse return error.ExpectedString;
             try self.store.addFile(crypto.checksum(str), str);
         }
-        if (self.env.log.level(1)) |w| {
-            try w.print("Received all content\n", .{});
-            try w.flush();
-        }
+        if (self.env.log.level(1)) |w|
+            try rubr.flush.print(w, "Received all content\n", .{});
     }
 
     // Recreate the folder

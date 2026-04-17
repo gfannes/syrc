@@ -9,7 +9,6 @@ const crypto = @import("crypto.zig");
 const fs = @import("fs.zig");
 const prot = @import("prot.zig");
 const rubr = @import("rubr.zig");
-const Env = rubr.Env;
 const srvr = @import("srvr.zig");
 
 pub const Error = error{
@@ -21,12 +20,12 @@ pub const Error = error{
 pub const App = struct {
     const Self = @This();
 
-    env: Env,
+    env: rubr.Env,
     config: *const cfg.Config,
     server: ?std.Io.net.Server = null,
     store: ?blob.Store = null,
 
-    pub fn init(env: Env, config: *const cfg.Config) Self {
+    pub fn init(env: rubr.Env, config: *const cfg.Config) Self {
         return Self{
             .env = env,
             .config = config,
@@ -111,7 +110,8 @@ pub const App = struct {
     }
 
     fn runClient(self: *Self) !void {
-        std.debug.print("app.runClient\n", .{});
+        if (self.env.log.level(1)) |w|
+            try rubr.flush.print(w, "app.runClient\n", .{});
         var client = clnt.Client{
             .env = self.env,
             .address = try self.address(),

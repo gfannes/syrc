@@ -36,10 +36,8 @@ pub const Server = struct {
     pub fn processOne(self: *Self) !void {
         var server = self.server orelse return error.ExpectedListeningServer;
 
-        if (self.env.log.level(1)) |w| {
-            try w.print("\nWaiting for connection...\n", .{});
-            try w.flush();
-        }
+        if (self.env.log.level(1)) |w|
+            try rubr.flush.print(w, "\nWaiting for connection...\n", .{});
 
         var session = comm.Session{
             .env = self.env,
@@ -53,7 +51,7 @@ pub const Server = struct {
             var stream = try server.accept(self.env.io);
             errdefer stream.close(self.env.io);
             if (self.env.log.level(1)) |w|
-                try w.print("Received connection {f}\n", .{stream.socket.address});
+                try rubr.flush.print(w, "Received connection {f}\n", .{stream.socket.address});
 
             try session.init(stream);
         }

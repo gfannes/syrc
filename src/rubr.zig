@@ -1,4 +1,4 @@
-// Output from `rake export[walker,cli,Log,profile,naft,util,comm,pipe,fs,fmt,Env]` from https://github.com/gfannes/rubr from 2026-03-31
+// Output from `rake export[walker,cli,Log,profile,naft,util,comm,pipe,fs,fmt,flush,Env]` from https://github.com/gfannes/rubr from 2026-04-17
 
 const std = @import("std");
 const builtin = @import("builtin");
@@ -502,10 +502,24 @@ pub const strng = struct {
             }
             return null;
         }
+        pub fn popOneBack(self: *Self) ?u8 {
+            if (self.content.len > 0) {
+                defer self._popBack(1);
+                return self.content[self.content.len - 1];
+            }
+            return null;
+        }
     
         pub fn popStr(self: *Self, s: []const u8) bool {
             if (std.mem.startsWith(u8, self.content, s)) {
                 self._popFront(s.len);
+                return true;
+            }
+            return false;
+        }
+        pub fn popStrBack(self: *Self, s: []const u8) bool {
+            if (std.mem.endsWith(u8, self.content, s)) {
+                self._popBack(s.len);
                 return true;
             }
             return false;
@@ -574,6 +588,12 @@ pub const strng = struct {
                 return null;
             defer self._popFront(count);
             return self.content[0..count];
+        }
+        pub fn popBack(self: *Self, count: usize) ?[]const u8 {
+            if (self.content.len < count)
+                return null;
+            defer self._popBack(count);
+            return self.content[self.content.len - count ..];
         }
     
         fn _popFront(self: *Self, count: usize) void {
@@ -967,6 +987,7 @@ pub const cli = struct {
             return Arg{ .arg = arg };
         }
     
+        // Can only be called when there was something popped first
         pub fn unpop(self: *Self) void {
             self.argv.ptr -= 1;
             self.argv.len += 1;
@@ -1931,4 +1952,12 @@ pub const fmt = struct {
         };
     }
     
+};
+
+// Export from 'src/flush.zig'
+pub const flush = struct {
+    pub fn print(w: *std.Io.Writer, comptime fmt_str: []const u8, args: anytype) !void {
+        try w.print(fmt_str, args);
+        try w.flush();
+    }
 };

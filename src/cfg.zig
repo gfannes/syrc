@@ -204,10 +204,8 @@ pub const Loader = struct {
             try f.add("syrc");
             try f.add("config.zon");
 
-            if (log.level(1)) |w| {
-                try w.print("Loading config from '{s}'\n", .{f.path()});
-                try w.flush();
-            }
+            if (log.level(1)) |w|
+                try rubr.flush.print(w, "Loading config from '{s}'\n", .{f.path()});
 
             self.loadConfigFromFile(f) catch |err| {
                 std.debug.print("Error: failed to load config file from '{s}': {}\n", .{ f.path(), err });

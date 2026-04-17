@@ -5,7 +5,6 @@ const prot = @import("prot.zig");
 const comm = @import("comm.zig");
 const blob = @import("blob.zig");
 const rubr = @import("rubr.zig");
-const Env = rubr.Env;
 
 pub const Error = error{
     ExpectedHello,
@@ -21,17 +20,24 @@ pub const Error = error{
 pub const Client = struct {
     const Self = @This();
 
-    env: Env,
+    env: rubr.Env,
     address: std.Io.net.IpAddress,
 
     session: comm.Session = undefined,
 
     pub fn init(self: *Self, folder: []const u8, store: *blob.Store, name: []const u8, suffix: ?[]const u8) !void {
         if (self.env.log.level(1)) |w|
-            try w.print("Connecting to {f}\n", .{self.address});
+            try rubr.flush.print(w, "Connecting to {f} ... ", .{self.address});
 
         var stream = try self.address.connect(self.env.io, .{ .mode = .stream });
-        errdefer stream.close();
+        errdefer {
+            stream.close(self.env.io);
+            if (self.env.log.level(1)) |w|
+                rubr.flush.print(w, "Failed\n", .{}) catch {};
+        }
+
+        if (self.env.log.level(1)) |w|
+            try rubr.flush.print(w, "OK\n", .{});
         self.session = comm.Session{ .env = self.env, .base = folder, .store = store, .name = name, .suffix = suffix };
         try self.session.init(stream);
     }
