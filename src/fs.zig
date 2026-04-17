@@ -54,13 +54,15 @@ pub fn collectTree(env: Env, folder: []const u8) !Tree {
 
         fn collect(my: *My) !void {
             if (my.env.log.level(1)) |w|
-                try rubr.flush.print(w, "Reading Tree...\n", .{});
+                try rubr.flush.print(w, "Reading Tree ... ", .{});
 
             const start_ts = std.Io.Clock.now(.real, my.env.io);
             try my.walker.walk(my.dir, my);
             const stop_ts = std.Io.Clock.now(.real, my.env.io);
-            if (my.env.log.level(1)) |w|
-                try rubr.flush.print(w, "Read {f}B in {f}s\n", .{ rubr.fmt.iso(my.total_size, false), rubr.fmt.iso(start_ts.durationTo(stop_ts).nanoseconds, true) });
+            if (my.env.log.level(1)) |w| {
+                try rubr.flush.print(w, "OK\n", .{});
+                try rubr.flush.print(w, "\tRead {f}B in {f}s\n", .{ rubr.fmt.iso(my.total_size, false), rubr.fmt.iso(start_ts.durationTo(stop_ts).nanoseconds, true) });
+            }
         }
 
         pub fn call(my: *My, dirr: std.Io.Dir, path: []const u8, maybe_offsets: ?rubr.walker.Offsets, kind: rubr.walker.Kind) !void {

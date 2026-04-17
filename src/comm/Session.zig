@@ -87,7 +87,7 @@ pub fn runClient(self: *Self, reset_folder: bool, cleanup_folder: bool, reset_st
 
         var hello: prot.Hello = .{ .a = a };
         if (try self.cio.receive2(&hello, &bye)) {
-            if (self.env.log.level(1)) |w|
+            if (self.env.log.level(2)) |w|
                 prot.printMessage(hello, w, null);
             if (hello.status != .Ok) {
                 try bye.setReason("Expected status Ok, not {}", .{hello.status});
@@ -95,7 +95,7 @@ pub fn runClient(self: *Self, reset_folder: bool, cleanup_folder: bool, reset_st
                 return error.ExpectedStatusOk;
             }
         } else {
-            if (self.env.log.level(1)) |w|
+            if (self.env.log.level(2)) |w|
                 prot.printMessage(bye, w, null);
             return error.PeerGaveUp;
         }
@@ -108,7 +108,7 @@ pub fn runClient(self: *Self, reset_folder: bool, cleanup_folder: bool, reset_st
         sync.reset_folder = reset_folder;
         sync.cleanup_folder = cleanup_folder;
         sync.reset_store = reset_store;
-        if (self.env.log.level(1)) |w|
+        if (self.env.log.level(2)) |w|
             prot.printMessage(sync, w, null);
 
         try self.cio.send(sync);
@@ -155,7 +155,7 @@ pub fn runClient(self: *Self, reset_folder: bool, cleanup_folder: bool, reset_st
                     }
                 }
             } else {
-                if (self.env.log.level(1)) |w|
+                if (self.env.log.level(2)) |w|
                     prot.printMessage(done, w, null);
                 break;
             }
@@ -166,7 +166,7 @@ pub fn runClient(self: *Self, reset_folder: bool, cleanup_folder: bool, reset_st
         // Collect
         if (collect) {
             const clt = prot.Collect{};
-            if (self.env.log.level(1)) |w|
+            if (self.env.log.level(2)) |w|
                 prot.printMessage(clt, w, null);
 
             try self.cio.send(clt);
@@ -190,7 +190,7 @@ pub fn runServer(self: *Self) !void {
     var hello: prot.Hello = .{ .a = aa };
     {
         if (try self.cio.receive2(&hello, &bye)) {
-            if (self.env.log.level(1)) |w|
+            if (self.env.log.level(2)) |w|
                 prot.printMessage(hello, w, null);
             if (hello.version != prot.My.version) {
                 try bye.setReason("Version mismatch: mine {} !=  peer {}", .{ prot.My.version, hello.version });
@@ -199,7 +199,7 @@ pub fn runServer(self: *Self) !void {
             }
             try self.cio.send(prot.Hello{ .a = aa, .role = .Client, .status = .Ok, .name = self.name, .suffix = self.suffix });
         } else {
-            if (self.env.log.level(1)) |w|
+            if (self.env.log.level(2)) |w|
                 prot.printMessage(bye, w, null);
             return error.PeerGaveUp;
         }
@@ -212,7 +212,7 @@ pub fn runServer(self: *Self) !void {
 
         if (!try self.cio.receive(&sync))
             return error.ExpectedSync;
-        if (self.env.log.level(1)) |w|
+        if (self.env.log.level(2)) |w|
             prot.printMessage(sync, w, null);
 
         if (sync.reset_store) {
@@ -240,7 +240,7 @@ pub fn runServer(self: *Self) !void {
         var run = prot.Run.init(aa);
 
         if (try self.cio.receive(&run)) {
-            if (self.env.log.level(1)) |w|
+            if (self.env.log.level(2)) |w|
                 prot.printMessage(run, w, null);
 
             try self.doRun(run, folder);
@@ -248,7 +248,7 @@ pub fn runServer(self: *Self) !void {
             // Collect
             var collect = prot.Collect{};
             if (try self.cio.receive(&collect)) {
-                if (self.env.log.level(1)) |w|
+                if (self.env.log.level(2)) |w|
                     prot.printMessage(collect, w, null);
 
                 try self.sendFolderToPeer(folder);
@@ -258,7 +258,7 @@ pub fn runServer(self: *Self) !void {
 
     // Hangup
     if (try self.cio.receive(&bye)) {
-        if (self.env.log.level(1)) |w|
+        if (self.env.log.level(2)) |w|
             prot.printMessage(bye, w, null);
     }
 }
@@ -489,7 +489,7 @@ fn sendFolderToPeer(self: *Self, folder: []const u8) !void {
         if (self.env.log.level(1)) |w|
             try rubr.flush.print(w, "Sending {} filestates ... ", .{tree.filestates.items.len});
         for (tree.filestates.items, 0..) |filestate, count| {
-            if (self.env.log.level(1)) |w|
+            if (self.env.log.level(2)) |w|
                 prot.printMessage(filestate, w, count);
 
             try self.cio.send(filestate);
@@ -530,7 +530,7 @@ fn sendFolderToPeer(self: *Self, folder: []const u8) !void {
 
         content.str = try tree.getContent(id);
 
-        if (self.env.log.level(1)) |w|
+        if (self.env.log.level(2)) |w|
             prot.printMessage(content, w, count);
 
         try self.cio.send(content);
@@ -556,7 +556,7 @@ fn receiveFolderFromPeer(self: *Self, a: std.mem.Allocator, folder: []const u8, 
             if (!try self.cio.receive(&filestate))
                 return error.ExpectedFileState;
 
-            if (self.env.log.level(1)) |w|
+            if (self.env.log.level(2)) |w|
                 prot.printMessage(filestate, w, tree.filestates.items.len);
 
             const id = filestate.id orelse break;
@@ -592,7 +592,7 @@ fn receiveFolderFromPeer(self: *Self, a: std.mem.Allocator, folder: []const u8, 
             if (!try self.cio.receive(&content))
                 return error.ExpectedContent;
 
-            if (self.env.log.level(1)) |w|
+            if (self.env.log.level(2)) |w|
                 prot.printMessage(content, w, count);
 
             if (content.id == null)

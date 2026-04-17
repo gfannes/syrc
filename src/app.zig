@@ -39,8 +39,6 @@ pub const App = struct {
     }
 
     pub fn run(self: *Self) !void {
-        try self.env.log.info("Running mode {any}\n", .{self.config.mode});
-
         switch (self.config.mode) {
             cfg.Mode.Client => try self.runClient(),
             cfg.Mode.Server => try self.runServer(),
@@ -110,7 +108,7 @@ pub const App = struct {
     }
 
     fn runClient(self: *Self) !void {
-        if (self.env.log.level(1)) |w|
+        if (self.env.log.level(2)) |w|
             try rubr.flush.print(w, "app.runClient\n", .{});
         var client = clnt.Client{
             .env = self.env,
@@ -150,16 +148,21 @@ pub const App = struct {
     }
 
     fn address(self: Self) !std.Io.net.IpAddress {
-        std.debug.print("ip: {s}\n", .{self.config.ip});
         return try std.Io.net.IpAddress.resolve(self.env.io, self.config.ip, self.config.port);
     }
 
     fn gocStore(self: *Self) !*blob.Store {
         if (self.store == null) {
             if (self.env.log.level(1)) |w|
-                try w.print("Creating blob store in '{s}'\n", .{self.config.store_path});
+                try rubr.flush.print(w, "Creating blob store in '{s}' ... ", .{self.config.store_path});
             self.store = blob.Store.init(self.env);
-            try self.store.?.open(self.config.store_path);
+            if (self.store.?.open(self.config.store_path)) {
+                if (self.env.log.level(1)) |w|
+                    try rubr.flush.print(w, "OK\n", .{});
+            } else |err| {
+                if (self.env.log.level(1)) |w|
+                    try rubr.flush.print(w, "Failed {}\n", .{err});
+            }
         }
         return &self.store.?;
     }

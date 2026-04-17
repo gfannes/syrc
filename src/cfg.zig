@@ -188,6 +188,8 @@ pub const Loader = struct {
     pub fn load(self: *Self, os_args: std.process.Args, log: *rubr.Log) !void {
         self.config = .{};
 
+        log.setLevel(self.config.verbose);
+
         // We first load CLI arguments:
         // - Set verbose as early as possible
         // - Can in the future be used to specify the config.zon to load
@@ -205,17 +207,20 @@ pub const Loader = struct {
             try f.add("config.zon");
 
             if (log.level(1)) |w|
-                try rubr.flush.print(w, "Loading config from '{s}'\n", .{f.path()});
+                try rubr.flush.print(w, "Loading config from '{s}' ... ", .{f.path()});
 
-            self.loadConfigFromFile(f) catch |err| {
-                std.debug.print("Error: failed to load config file from '{s}': {}\n", .{ f.path(), err });
-            };
+            if (self.loadConfigFromFile(f)) {
+                if (log.level(1)) |w|
+                    try rubr.flush.print(w, "OK\n", .{});
+            } else |err| {
+                if (log.level(1)) |w|
+                    try rubr.flush.print(w, "Failed {}\n", .{err});
+            }
         }
 
         // Merge CLI arguments into self.config
-        self.updateConfigFromCliArgs() catch |err| {
-            std.debug.print("Error: failed to parse CLI arguments: {}\n", .{err});
-        };
+        self.updateConfigFromCliArgs(log) catch |err|
+            try log.err("Failed to parse CLI arguments: {}\n", .{err});
 
         try self.updateConfigWithDefaults();
     }
@@ -229,7 +234,7 @@ pub const Loader = struct {
         self.config = try std.zon.parse.fromSliceAlloc(Config, self.aa, content, null, .{});
     }
 
-    pub fn updateConfigFromCliArgs(self: *Self) !void {
+    pub fn updateConfigFromCliArgs(self: *Self, log: *rubr.Log) !void {
         const config: *Config = &self.config;
         const cli_args: *CliArgs = &self.cli_args;
 
@@ -239,6 +244,8 @@ pub const Loader = struct {
                 for (config.aliases) |alias| {
                     if (std.mem.eql(u8, extra, alias.name)) {
                         cli_args.ip = alias.ip;
+                        if (log.level(1)) |w|
+                            try rubr.flush.print(w, "\tReplaced IP '{s}' with '{s}'\n", .{ extra, alias.ip });
                         continue :outer;
                     }
                 }
