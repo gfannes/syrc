@@ -15,8 +15,8 @@ pub fn main(init: std.process.Init) !void {
 
     const env = env_inst.env();
 
-    const s = rubr.profile.Scope.init(env.io, .A, env.stdout);
-    defer s.deinit();
+    var s = try rubr.profile.Scope.start(env.io, .{ .ix = 0 });
+    defer s.stop() catch {};
 
     var cfg_loader: cfg.Loader = .{};
     try cfg_loader.init(env);

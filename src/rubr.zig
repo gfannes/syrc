@@ -1,4 +1,4 @@
-// Output from `rake export[walker,cli,Log,profile,naft,util,comm,pipe,fs,fmt,flush,Env]` from https://github.com/gfannes/rubr from 2026-04-17
+// Output from `rake export[walker,cli,Log,profile,naft,util,comm,pipe,fs,fmt,flush,Env]` from https://github.com/gfannes/rubr from 2026-10-21
 
 const std = @import("std");
 const builtin = @import("builtin");
@@ -305,6 +305,10 @@ pub const slc = struct {
         return &slice[slice.len - 1];
     }
     
+    pub fn get(slice: anytype, ix: usize) ?@TypeOf(slice[0]) {
+        return if (slice.len > ix) slice[ix] else null;
+    }
+    
 };
 
 // Export from 'src/Env.zig'
@@ -471,6 +475,7 @@ pub const strng = struct {
             return count;
         }
     
+        // Pops ch as well but won't include this in the return slice
         pub fn popTo(self: *Self, ch: u8) ?[]const u8 {
             if (std.mem.indexOfScalar(u8, self.content, ch)) |ix| {
                 defer self._popFront(ix + 1);
@@ -900,6 +905,19 @@ pub const Log = struct {
         self.initWriter();
     }
     
+    pub fn toStdout(self: *Self) !void {
+        try self.closeWriter();
+    
+        self._file = std.Io.File.stdout();
+        self.initWriter();
+    }
+    pub fn toStderr(self: *Self) !void {
+        try self.closeWriter();
+    
+        self._file = std.Io.File.stderr();
+        self.initWriter();
+    }
+    
     pub fn setLevel(self: *Self, lvl: usize) void {
         self._lvl = lvl;
     }
@@ -1012,44 +1030,118 @@ pub const cli = struct {
 
 // Export from 'src/profile.zig'
 pub const profile = struct {
-    pub const Id = enum {
-        A,
-        B,
-        C,
+    pub const Error = error{
+        NotRunning,
+        StillRunning,
+        IxOutOfRange,
+        NameMismatch,
     };
+    
+    pub fn now(io: std.Io) std.Io.Timestamp {
+        return std.Io.Clock.now(.real, io);
+    }
     
     const Timestamp = i128;
     
     const Measurement = struct {
+        pub const Self = @This();
+    
+        name: ?[]const u8 = null,
+        sum: Timestamp = 0,
         max: Timestamp = 0,
     };
     
-    const count = @typeInfo(Id).@"enum".fields.len;
-    var measurements = [_]Measurement{Measurement{}} ** count;
+    const Descriptor = struct {
+        ix: usize,
+        name: ?[]const u8 = null,
+    };
     
     pub const Scope = struct {
         const Self = @This();
     
+        const max_measurement_count: usize = 16;
+    
         io: std.Io,
     
-        id: Id,
+        ix: usize,
         start_ts: std.Io.Timestamp,
-        w: *std.Io.Writer,
     
-        pub fn init(io: std.Io, id: Id, w: *std.Io.Writer) Scope {
-            return Scope{ .io = io, .id = id, .start_ts = std.Io.Clock.now(.real, io), .w = w };
-        }
-        pub fn deinit(self: Self) void {
-            const elapse_ns = self.start_ts.durationTo(self.now()).nanoseconds;
-            measurements[@intFromEnum(self.id)].max = elapse_ns;
-            const a = @divFloor(elapse_ns, 1_000_000_000);
-            const b = elapse_ns - a * 1_000_000_000;
-            self.w.print("elapse: {}.{:0>9.9}s\n", .{ a, @as(u64, @intCast(b)) }) catch {};
-            self.w.flush() catch {};
+        measurements: [max_measurement_count]?Measurement = @splat(null),
+        running: bool = true,
+    
+        pub fn start(io: std.Io, desc: Descriptor) !Self {
+            var rv: Self = .{ .io = io, .ix = desc.ix, .start_ts = now(io) };
+            try rv.setup(desc);
+            return rv;
         }
     
-        fn now(self: Self) std.Io.Timestamp {
-            return std.Io.Clock.now(.real, self.io);
+        pub fn stop(self: *Self) !void {
+            try self.mark(.{ .ix = self.ix });
+            self.running = false;
+        }
+    
+        pub fn mark(self: *Self, desc: Descriptor) !void {
+            if (!self.running)
+                return error.NotRunning;
+    
+            const now_ts = now(self.io);
+    
+            var m = self.measurements[self.ix].?;
+            {
+                const elapse_ns = self.start_ts.durationTo(now_ts).nanoseconds;
+                m.sum += elapse_ns;
+                m.max = @max(m.max, elapse_ns);
+            }
+            self.measurements[self.ix] = m;
+    
+            try self.setup(desc);
+            self.ix = desc.ix;
+            self.start_ts = now_ts;
+        }
+    
+        pub fn measurement(self: Self, ix: usize) !?Measurement {
+            if (self.running)
+                return error.StillRunning;
+            return self.measurements[ix];
+        }
+    
+        pub fn format(self: Self, w: *std.Io.Writer) !void {
+            for (0..max_measurement_count) |ix| {
+                if (self.measurements[ix]) |m| {
+                    try w.print("[Measurement]", .{});
+                    const Local = struct {
+                        fn print(ts: Timestamp, desc: []const u8, ww: *std.Io.Writer) !void {
+                            const a = @divFloor(ts, 1_000_000_000);
+                            const b = ts - a * 1_000_000_000;
+                            try ww.print("({s}:{}.{:0>9.9}s)", .{ desc, a, @as(u64, @intCast(b)) });
+                        }
+                    };
+                    try Local.print(m.sum, "sum", w);
+                    try Local.print(m.max, "max", w);
+                    if (m.name) |name|
+                        try w.print("(name:{s})", .{name});
+                    try w.print("(ix:{})\n", .{ix});
+                    try w.flush();
+                }
+            }
+        }
+    
+        fn setup(self: *Self, desc: Descriptor) !void {
+            if (desc.ix >= max_measurement_count)
+                return error.IxOutOfRange;
+    
+            if (self.measurements[desc.ix]) |*m| {
+                if (desc.name) |name| {
+                    if (m.name) |m_name| {
+                        if (!std.mem.eql(u8, name, m_name))
+                            return error.NameMismatch;
+                    } else {
+                        m.name = name;
+                    }
+                }
+            } else {
+                self.measurements[desc.ix] = Measurement{ .name = desc.name };
+            }
         }
     };
     
@@ -1071,6 +1163,13 @@ pub const naft = struct {
         has_block: bool = false,
         // Indicates if this Node already contains a Node. This is used for deciding newlines etc.
         has_node: bool = false,
+    
+        // Helper to implement `fn format()` when `fn write()` is present
+        pub fn write(v: anytype, w: *std.Io.Writer) void {
+            var r = Node.root(w);
+            defer r.deinit();
+            v.write(&r);
+        }
     
         pub fn root(w: ?*std.Io.Writer) Node {
             return .{ .w = w, .has_block = true };
@@ -1837,6 +1936,12 @@ pub const fs = struct {
     
             @memmove(res.buffer[0..res.len], value);
             return res;
+        }
+    
+        pub fn cwd(io: std.Io) !Self {
+            var rv: Self = .{};
+            rv.len = try std.process.currentPath(io, &rv.buffer);
+            return rv;
         }
     
         pub fn add(self: *Self, part: []const u8) !void {

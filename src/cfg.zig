@@ -231,7 +231,9 @@ pub const Loader = struct {
 
         const content = try f.readSentinel(self.io, self.a);
         defer self.a.free(content);
-        self.config = try std.zon.parse.fromSliceAlloc(Config, self.aa, content, null, .{});
+
+        var diagnostics: std.zon.parse.Diagnostics = undefined;
+        self.config = try std.zon.parse.fromSlice(Config, .{ .gpa = self.aa, .arena = self.aa, .source = content, .diagnostics = &diagnostics });
     }
 
     pub fn updateConfigFromCliArgs(self: *Self, log: *rubr.Log) !void {
